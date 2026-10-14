@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mscs/internal/config"
+	"mscs/internal/database"
 	"mscs/internal/server"
 )
 
@@ -28,7 +29,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	srv := server.New(cfg)
+	pg, err := database.NewPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pg.Close()
+	log.Println("postgres connected")
+
+	srv := server.New(cfg, pg)
 
 	// ListenAndServe blocks forever, so run it in a goroutine and keep main free to wait for the signal.
 	go func() {

@@ -6,18 +6,21 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mscs/internal/config"
 	"mscs/internal/handler"
 )
 
 // New returns an *http.Server that is configured but not started yet.
-func New(cfg config.Config) *http.Server {
+func New(cfg config.Config, pg *pgxpool.Pool) *http.Server {
 	r := gin.New()
 	r.Use(gin.Logger())   // log every request
 	r.Use(gin.Recovery()) // turn a panic into a 500 response instead of crashing the process
 
-	r.GET("/healthz", handler.Health)
+	health := handler.NewHealthHandler(pg)
+	r.GET("/healthz", health.Live)
+	r.GET("/readyz", health.Ready)
 
 	return &http.Server{
 		Addr:    ":" + cfg.Port,
