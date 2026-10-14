@@ -3,9 +3,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"mscs/internal/config"
+	"mscs/internal/server"
 )
 
 func main() {
@@ -16,4 +23,30 @@ func main() {
 
 	// Never log DATABASE_URL / MONGO_URI: they contain passwords.
 	log.Printf("config loaded: port=%s mongo_db=%s", cfg.Port, cfg.MongoDB)
+
+	// ctx is cancelled when we receive Ctrl+C (SIGINT) or `docker stop` (SIGTERM).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	srv := server.New(cfg)
+
+	// ListenAndServe blocks forever, so run it in a goroutine and keep main free to wait for the signal.
+	go func() {
+		log.Printf("http server listening on %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("http server: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("shutting down...")
+
+	// Give in-flight requests up to 10 seconds to finish.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("graceful shutdown failed: %v", err)
+	}
+	log.Println("server stopped")
 }
