@@ -1,0 +1,9 @@
+DROP POLICY IF EXISTS member_self_read ON tenant_members;
+DROP POLICY IF EXISTS tenant_isolation ON tenant_members;
+ALTER TABLE tenant_members NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_members DISABLE ROW LEVEL SECURITY;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM mscs_app;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON tenants, users, tenant_members FROM mscs_app;
+REVOKE USAGE ON SCHEMA public FROM mscs_app;

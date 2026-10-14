@@ -10,7 +10,8 @@ services:
     environment:
       APP_PORT: "8080"
       # Inside the compose network, services reach each other by service name (postgres, mongo).
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      # The API logs in as mscs_app (restricted, subject to RLS), never as the superuser.
+      DATABASE_URL: postgres://mscs_app:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
       MONGO_DB: ${MONGO_DB}
     ports:
@@ -27,12 +28,15 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD} # read by initdb/01-create-app-role.sh
     ports:
       # Bound to localhost only, so the DB is not reachable from other machines on the network.
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Postgres 18+ images keep data under /var/lib/postgresql/<version>/...
       - pgdata:/var/lib/postgresql
+      # Scripts here run once, on first start with an empty data volume.
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -56,6 +60,7 @@ services:
 
   # One-off tool, not a long-running service: the "tools" profile keeps it out of `docker compose up`.
   # Usage: docker compose run --rm migrate up
+  # Runs as the superuser/owner because it creates tables; the API never does.
   migrate:
     image: migrate/migrate:v4.19.0
     profiles: ["tools"]
