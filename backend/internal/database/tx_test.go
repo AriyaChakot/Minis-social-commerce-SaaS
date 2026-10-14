@@ -3,29 +3,21 @@ package database
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"mscs/internal/testutil/dbtest"
 )
 
 // Integration test: it needs a migrated Postgres and DATABASE_URL pointing at the
 // restricted app role (mscs_app), because a superuser would bypass RLS.
 // Without DATABASE_URL the test is skipped, so `go test ./...` still passes anywhere.
 func TestInTx_RLS(t *testing.T) {
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-
 	ctx := context.Background()
-	pool, err := NewPostgres(ctx, url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := dbtest.Pool(t)
 
 	shopA, shopB, user := seed(t, ctx, pool)
 
@@ -100,7 +92,7 @@ func TestInTx_RLS(t *testing.T) {
 // seed creates two tenants and one user with unique values, and removes them when the test ends.
 func seed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (shopA, shopB, user uuid.UUID) {
 	t.Helper()
-	suffix := uuid.NewString()[:8]
+	suffix := dbtest.Suffix()
 
 	// tenants and users have no RLS, so no scope is needed here.
 	err := InTx(ctx, pool, Scope{}, func(tx pgx.Tx) error {
