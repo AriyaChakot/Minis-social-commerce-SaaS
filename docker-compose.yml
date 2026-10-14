@@ -54,6 +54,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-off tool, not a long-running service: the "tools" profile keeps it out of `docker compose up`.
+  # Usage: docker compose run --rm migrate up
+  migrate:
+    image: migrate/migrate:v4.19.0
+    profiles: ["tools"]
+    volumes:
+      - ./backend/migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 # Named volumes: data survives `docker compose down` (removed only with `down -v`).
 volumes:
   pgdata:
