@@ -4,6 +4,7 @@ go 1.26.9
 
 require (
 	github.com/gin-gonic/gin v1.12.0
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	go.mongodb.org/mongo-driver/v2 v2.9.2
 )
