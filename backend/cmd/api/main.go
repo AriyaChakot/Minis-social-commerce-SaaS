@@ -36,7 +36,20 @@ func main() {
 	defer pg.Close()
 	log.Println("postgres connected")
 
-	srv := server.New(cfg, pg)
+	mg, err := database.NewMongo(ctx, cfg.MongoURI, cfg.MongoDB)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := mg.Close(closeCtx); err != nil {
+			log.Printf("mongo: close: %v", err)
+		}
+	}()
+	log.Println("mongo connected")
+
+	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg})
 
 	// ListenAndServe blocks forever, so run it in a goroutine and keep main free to wait for the signal.
 	go func() {
