@@ -16,7 +16,11 @@ dist/
 .nuxt/
 .output/
 .svelte-kit/
+# SvelteKit adapter-node output
+/frontend/apps/*/build/
 *.tsbuildinfo
+# Playwright MCP browser-test artifacts
+.playwright-mcp/
 npm-debug.log*
 pnpm-debug.log*
 

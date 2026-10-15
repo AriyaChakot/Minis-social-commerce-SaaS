@@ -2,8 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"mscs/internal/database"
+	"mscs/internal/securetoken"
 )
 
 // SessionTTL is how long a login stays valid.
@@ -24,17 +23,10 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// newToken returns 128 bits of randomness as 26 base32 characters (crypto/rand.Text, Go 1.24+).
-func newToken() string {
-	return rand.Text()
-}
-
-// hashToken is SHA-256, not Argon2: the token is already long and random,
-// so a fast hash is enough and keeps every authenticated request cheap.
-func hashToken(token string) []byte {
-	sum := sha256.Sum256([]byte(token))
-	return sum[:]
-}
+// newToken and hashToken: see package securetoken (shared with order tracking links).
+// SHA-256 rather than Argon2 keeps every authenticated request cheap.
+func newToken() string              { return securetoken.New() }
+func hashToken(token string) []byte { return securetoken.Hash(token) }
 
 // sessionStore is the repository for the sessions table (unexported: only this package uses it).
 type sessionStore struct{}

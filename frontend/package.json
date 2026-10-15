@@ -4,7 +4,10 @@
   "packageManager": "pnpm@10.34.7",
   "scripts": {
     "dev:merchant": "pnpm --filter @mscs/merchant dev",
+    "dev:storefront": "pnpm --filter @mscs/storefront dev",
     "build:merchant": "pnpm --filter @mscs/merchant build",
+    "build:storefront": "pnpm --filter @mscs/storefront build",
+    "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }
 }

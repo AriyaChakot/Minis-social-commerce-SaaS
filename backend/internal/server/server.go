@@ -18,6 +18,7 @@ import (
 	"mscs/internal/handler"
 	"mscs/internal/order"
 	"mscs/internal/product"
+	"mscs/internal/storefront"
 	"mscs/internal/tenant"
 )
 
@@ -53,14 +54,24 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	// Composition root: services are built here and handed to handlers (dependency injection).
 	authSvc := auth.NewService(deps.Postgres)
 	authH := handler.NewAuthHandler(authSvc)
-	productH := handler.NewProductHandler(product.NewService(deps.Postgres))
-	orderH := handler.NewOrderHandler(order.NewService(deps.Postgres))
+	productSvc := product.NewService(deps.Postgres)
+	orderSvc := order.NewService(deps.Postgres)
+	productH := handler.NewProductHandler(productSvc)
+	orderH := handler.NewOrderHandler(orderSvc)
+	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc))
 
 	api := r.Group("/api/v1")
 	{
 		// Public routes.
 		api.POST("/auth/register", authH.Register)
 		api.POST("/auth/login", authH.Login)
+
+		// Customer-facing storefront: no login, the shop is chosen by its slug.
+		store := api.Group("/public/shops/:slug")
+		store.GET("", storeH.Shop)
+		store.GET("/products", storeH.Products)
+		store.POST("/orders", storeH.PlaceOrder)
+		store.GET("/orders/:token", storeH.TrackOrder)
 
 		// Routes for any logged-in user.
 		authed := api.Group("", handler.RequireAuth(authSvc))

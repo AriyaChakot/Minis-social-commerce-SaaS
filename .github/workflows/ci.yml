@@ -88,7 +88,7 @@ jobs:
         run: docker build -t mscs-api:ci .
 
   frontend:
-    name: Frontend (Nuxt)
+    name: Frontend (Nuxt + SvelteKit)
     runs-on: ubuntu-latest
 
     defaults:
@@ -116,5 +116,6 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Builds every app: the Nuxt merchant admin and the SvelteKit storefront.
       - name: Build
-        run: pnpm build:merchant
+        run: pnpm build

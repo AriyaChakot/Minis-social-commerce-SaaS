@@ -3,9 +3,11 @@
 [![CI](https://github.com/AriyaChakot/Minis-social-commerce-SaaS/actions/workflows/ci.yml/badge.svg)](https://github.com/AriyaChakot/Minis-social-commerce-SaaS/actions/workflows/ci.yml)
 
 Order management for small online shops that sell through **LINE, Facebook and Instagram chats**.
-Each shop (tenant) manages its catalog and records the orders its customers place in chat:
-stock is reserved the moment an order is created, and every order moves through a clear
-lifecycle — *pending → paid → shipped → completed* (or *cancelled*, which returns the stock).
+Each shop (tenant) manages its catalog and records the orders its customers place in chat — or
+shares its own **online storefront link**, where customers order without an account and follow
+their order through a private tracking link. Stock is reserved the moment an order is created, and
+every order moves through a clear lifecycle — *pending → paid → shipped → completed* (or
+*cancelled*, which returns the stock).
 
 Built as a portfolio project to practice production-grade backend and frontend engineering:
 multi-tenant data isolation, concurrency-safe inventory, secure session handling, and tests that
@@ -16,8 +18,10 @@ run against a real database.
 | ![Orders list](docs/screenshots/orders.png) | ![Create order](docs/screenshots/new-order.png) |
 | **Order detail** | **Products** |
 | ![Order detail](docs/screenshots/order-detail.png) | ![Products](docs/screenshots/products.png) |
+| **Storefront (customer)** | **Order tracking (customer)** |
+| ![Storefront](docs/screenshots/storefront-shop.png) | ![Order tracking](docs/screenshots/storefront-order.png) |
 
-*The merchant UI is in Thai, the language of its target users.*
+*The UI is in Thai, the language of its target users.*
 
 ---
 
@@ -29,17 +33,23 @@ run against a real database.
 - **Orders** — multi-item orders with stock reservation, per-shop order numbers (`#1001`, `#1002`…), status
   state machine with timestamps, cancellation that returns stock.
 - **Merchant admin web app** — server-rendered Nuxt app with form validation, toasts, confirmation dialogs.
+- **Customer storefront** — SvelteKit app at `/s/<shop-slug>`: product grid, cart, guest checkout, and a private
+  tracking page that shows the order's progress as the merchant updates it.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    B[Browser<br/>Vue / Nuxt UI] -- "/api/* + HttpOnly cookie" --> N[Nuxt server<br/>BFF]
-    N -- "Bearer token" --> G[Go API<br/>Gin]
+    B[Merchant browser<br/>Vue / Nuxt UI] -- "/api/* + HttpOnly cookie" --> N[Nuxt server<br/>BFF]
+    C[Customer browser<br/>Svelte] -- "pages + form actions" --> S[SvelteKit server<br/>storefront]
+    N -- "Bearer token<br/>/api/v1/..." --> G[Go API<br/>Gin]
+    S -- "public endpoints<br/>/api/v1/public/..." --> G
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
     G -. "health / future chat inbox" .-> M[(MongoDB 8)]
     MG[golang-migrate] -- "schema owner role" --> P
 ```
+
+Browsers never call the Go API directly: each frontend has its own server (Nuxt / SvelteKit) that does.
 
 The Go API is a **modular monolith**: one deployable, organised by business domain
 (`auth`, `tenant`, `user`, `product`, `order`), each with its own model, repository and service.
@@ -51,7 +61,8 @@ Handlers translate HTTP; services hold the business rules; repositories hold the
 |---|---|
 | API | Go 1.26, Gin, pgx v5, golang-migrate |
 | Database | PostgreSQL 18 (UUIDv7, Row-Level Security), MongoDB 8 |
-| Frontend | Nuxt 4, Vue 3, TypeScript, Nuxt UI 4 (Tailwind CSS 4), Zod |
+| Merchant app | Nuxt 4, Vue 3, TypeScript, Nuxt UI 4 (Tailwind CSS 4), Zod |
+| Storefront | SvelteKit 3, Svelte 5 (runes), TypeScript 6, Tailwind CSS 4 |
 | Tooling | Docker Compose, pnpm workspaces, GitHub Actions |
 
 ## Engineering highlights
@@ -82,6 +93,13 @@ revoked instantly (unlike stateless JWTs). The browser never sees the token: the
 check for state-changing requests. Login responses are identical — and take the same time — for unknown
 emails and wrong passwords.
 
+**Guest checkout without accounts.** A storefront order returns a random tracking token once; only its SHA-256
+hash is stored, so the link (`/s/<shop>/orders/<token>`) is the customer's receipt and nobody else's. The public
+API exposes dedicated view types (no SKU, phone, address or internal ids), and the server — not the client —
+decides prices, channel and shipping fee. Checkout is a SvelteKit form action (works as a plain HTML form,
+protected by SvelteKit's origin check); the tracking page sends `Cache-Control: private, no-store` and a
+`no-referrer` policy, so the secret URL is neither cached nor leaked to other sites.
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -104,9 +122,13 @@ docker compose run --rm migrate up
 cd frontend
 pnpm install
 pnpm dev:merchant
+
+# 5. In a second terminal: the customer storefront (http://localhost:5173)
+pnpm dev:storefront
 ```
 
-Open http://localhost:3000, sign up, add a few products and create an order.
+Open http://localhost:3000, sign up, add a few products and create an order. Then open
+`http://localhost:5173/s/<your-shop-slug>` to shop as a customer — the order appears in the merchant app.
 
 ## Tests
 
@@ -131,7 +153,8 @@ cd frontend && pnpm typecheck
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs gofmt, `go vet`, the full test suite with
-`-race` against PostgreSQL 18, the Docker image build, and the frontend typecheck and production build.
+`-race` against PostgreSQL 18, the Docker image build, and the typecheck (`vue-tsc`, `svelte-check`) and
+production build of both frontends.
 
 ## API overview
 
@@ -150,6 +173,15 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `GET` | `/tenants/:tenantID/orders/:orderID` | Order with its lines |
 | `POST` | `/tenants/:tenantID/orders/:orderID/status` | Move along the state machine |
 
+**Public storefront API** (no login; `:slug` selects an active shop):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/public/shops/:slug` | Shop name |
+| `GET` | `/public/shops/:slug/products` | Products on sale (public fields only) |
+| `POST` | `/public/shops/:slug/orders` | Guest order; returns the order and a one-time tracking token |
+| `GET` | `/public/shops/:slug/orders/:token` | Track a guest order |
+
 `GET /healthz` (liveness) and `GET /readyz` (readiness: pings PostgreSQL and MongoDB).
 
 ## Project structure
@@ -161,11 +193,14 @@ backend/
     auth/               passwords (Argon2id), sessions, auth use cases
     tenant/ user/       shops, memberships, users
     product/ order/     catalog, stock, orders and their state machine
+    storefront/         public, customer-facing use cases and view types
+    securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
     database/           pool, RLS-scoped transactions (InTx), shared helpers
     handler/ server/    HTTP handlers, middleware, routes
   migrations/           SQL migrations (golang-migrate)
 frontend/               pnpm workspace
   apps/merchant/        Nuxt merchant admin (app/ = UI, server/ = BFF)
+  apps/storefront/      SvelteKit customer storefront
   packages/shared/      API types and helpers shared by all frontends
 docker/                 Postgres init script (restricted app role)
 scripts/                developer helpers
@@ -173,11 +208,13 @@ scripts/                developer helpers
 
 ## Roadmap
 
-- [ ] Customer storefront and checkout (SvelteKit)
+- [x] Customer storefront and guest checkout (SvelteKit)
 - [ ] Chat inbox for LINE / Facebook messages (MongoDB, webhooks)
-- [ ] Background worker: expire unpaid orders, clean up sessions (leader election via Postgres advisory locks)
+- [ ] Background worker: expire unpaid orders (also frees stock held by abandoned guest orders), clean up
+      sessions (leader election via Postgres advisory locks)
+- [ ] Rate limiting on public endpoints (guest orders) and login
 - [ ] Platform admin console (React)
-- [ ] Staff invitations, rate limiting on login
+- [ ] Staff invitations, shipping fees for storefront orders, product photos
 
 ---
 

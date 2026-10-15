@@ -45,14 +45,17 @@ func (Repository) NextNumber(ctx context.Context, db database.DBTX, tenantID uui
 }
 
 // Insert saves o and fills in the columns the database generates (id, status, timestamps...).
-func (Repository) Insert(ctx context.Context, db database.DBTX, o *Order) error {
+// trackingTokenHash may be nil (no public tracking link).
+func (Repository) Insert(ctx context.Context, db database.DBTX, o *Order, trackingTokenHash []byte) error {
 	saved, err := scanOrder(db.QueryRow(ctx,
 		`INSERT INTO orders (tenant_id, order_number, customer_name, customer_phone, shipping_address,
-		                     channel, note, subtotal_satang, shipping_fee_satang, total_satang, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		                     channel, note, subtotal_satang, shipping_fee_satang, total_satang, created_by,
+		                     tracking_token_hash)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 RETURNING `+orderColumns,
 		o.TenantID, o.OrderNumber, o.CustomerName, o.CustomerPhone, o.ShippingAddress,
 		o.Channel, o.Note, o.SubtotalSatang, o.ShippingFeeSatang, o.TotalSatang, o.CreatedBy,
+		trackingTokenHash,
 	))
 	if err != nil {
 		return fmt.Errorf("order: insert: %w", err)
@@ -88,6 +91,21 @@ func (Repository) Get(ctx context.Context, db database.DBTX, tenantID, id uuid.U
 	}
 	if err != nil {
 		return Order{}, fmt.Errorf("order: get: %w", err)
+	}
+	return o, nil
+}
+
+// GetByTrackingToken finds an order by the hash of its public tracking token.
+func (Repository) GetByTrackingToken(ctx context.Context, db database.DBTX, tenantID uuid.UUID, tokenHash []byte) (Order, error) {
+	o, err := scanOrder(db.QueryRow(ctx,
+		`SELECT `+orderColumns+` FROM orders WHERE tenant_id = $1 AND tracking_token_hash = $2`,
+		tenantID, tokenHash,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Order{}, ErrNotFound
+	}
+	if err != nil {
+		return Order{}, fmt.Errorf("order: get by tracking token: %w", err)
 	}
 	return o, nil
 }

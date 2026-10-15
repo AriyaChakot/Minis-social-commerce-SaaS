@@ -12,6 +12,7 @@ import (
 
 	"mscs/internal/database"
 	"mscs/internal/product"
+	"mscs/internal/securetoken"
 	"mscs/internal/tenant"
 )
 
@@ -38,7 +39,38 @@ func (s *Service) inTenant(ctx context.Context, tenantID uuid.UUID, fn func(tx p
 	return database.InTx(ctx, s.pool, database.Scope{TenantID: tenantID}, fn)
 }
 
-// Create places an order and takes the items out of stock, all in one transaction:
+// Create records an order entered by a shop member (createdBy) in the merchant app.
+func (s *Service) Create(ctx context.Context, tenantID, createdBy uuid.UUID, in CreateInput) (Order, error) {
+	return s.place(ctx, tenantID, &createdBy, in, nil)
+}
+
+// PlaceGuestOrder records an order placed by a customer without an account (the storefront).
+// It returns the order and a tracking token: the customer's only way to view the order later.
+// The token is returned exactly once; only its hash is stored.
+func (s *Service) PlaceGuestOrder(ctx context.Context, tenantID uuid.UUID, in CreateInput) (Order, string, error) {
+	token := securetoken.New()
+	o, err := s.place(ctx, tenantID, nil, in, securetoken.Hash(token))
+	if err != nil {
+		return Order{}, "", err
+	}
+	return o, token, nil
+}
+
+// Track finds the order that a guest's tracking token belongs to, with its lines.
+func (s *Service) Track(ctx context.Context, tenantID uuid.UUID, token string) (Order, error) {
+	var o Order
+	err := s.inTenant(ctx, tenantID, func(tx pgx.Tx) error {
+		var err error
+		if o, err = s.repo.GetByTrackingToken(ctx, tx, tenantID, securetoken.Hash(token)); err != nil {
+			return err
+		}
+		o.Items, err = s.repo.Items(ctx, tx, tenantID, o.ID)
+		return err
+	})
+	return o, err
+}
+
+// place creates an order and takes the items out of stock, all in one transaction:
 //
 //  1. lock the products (FOR UPDATE) so nobody else can sell the same units meanwhile
 //  2. check each product is active and has enough stock
@@ -46,7 +78,8 @@ func (s *Service) inTenant(ctx context.Context, tenantID uuid.UUID, fn func(tx p
 //  4. take the stock, number the order, save order + lines
 //
 // If any step fails, the transaction rolls back and no stock is taken.
-func (s *Service) Create(ctx context.Context, tenantID, createdBy uuid.UUID, in CreateInput) (Order, error) {
+// createdBy is nil for guest orders; trackingTokenHash is nil for merchant orders.
+func (s *Service) place(ctx context.Context, tenantID uuid.UUID, createdBy *uuid.UUID, in CreateInput, trackingTokenHash []byte) (Order, error) {
 	if err := normalizeCreate(&in); err != nil {
 		return Order{}, err
 	}
@@ -111,9 +144,9 @@ func (s *Service) Create(ctx context.Context, tenantID, createdBy uuid.UUID, in 
 			SubtotalSatang:    subtotal,
 			ShippingFeeSatang: in.ShippingFeeSatang,
 			TotalSatang:       subtotal + in.ShippingFeeSatang,
-			CreatedBy:         &createdBy,
+			CreatedBy:         createdBy,
 		}
-		if err := s.repo.Insert(ctx, tx, &created); err != nil {
+		if err := s.repo.Insert(ctx, tx, &created, trackingTokenHash); err != nil {
 			return err
 		}
 		for i := range items {

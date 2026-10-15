@@ -156,6 +156,59 @@ export interface CreateOrderRequest {
   items: { product_id: ID; quantity: number }[]
 }
 
+// ---- Storefront (public, no login) ----------------------------------------------
+// Public views returned by /api/v1/public/shops/:slug/...: deliberately smaller than the
+// merchant types (no SKU, phone, address or internal ids).
+
+export interface StorefrontShop {
+  slug: string
+  name: string
+}
+
+export interface StorefrontProduct {
+  id: ID
+  name: string
+  description: string
+  price_satang: Satang
+  stock: number
+}
+
+export interface StorefrontOrderLine {
+  product_name: string
+  unit_price_satang: Satang
+  quantity: number
+  line_total_satang: Satang
+}
+
+export interface StorefrontOrder {
+  order_number: number
+  status: OrderStatus
+  customer_name: string
+  items: StorefrontOrderLine[]
+  subtotal_satang: Satang
+  shipping_fee_satang: Satang
+  total_satang: Satang
+  created_at: Timestamp
+  paid_at: Timestamp | null
+  shipped_at: Timestamp | null
+  completed_at: Timestamp | null
+  cancelled_at: Timestamp | null
+}
+
+export interface PlaceOrderRequest {
+  customer_name: string
+  customer_phone: string
+  shipping_address: string
+  note?: string
+  items: { product_id: ID; quantity: number }[]
+}
+
+export interface PlaceOrderResponse {
+  order: StorefrontOrder
+  /** Shown once: the customer's only key to view the order later. */
+  tracking_token: string
+}
+
 // ---- Pagination ---------------------------------------------------------------
 
 /** Keyset-paginated list: pass next_cursor back as ?cursor= to get the next page. */
