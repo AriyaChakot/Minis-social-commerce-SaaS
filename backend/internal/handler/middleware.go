@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -61,6 +62,19 @@ func RequireTenantMember(svc *auth.Service) gin.HandlerFunc {
 		}
 		c.Set(ctxTenantKey, t)
 		c.Set(ctxRoleKey, role)
+		c.Next()
+	}
+}
+
+// RequireRole must run after RequireTenantMember. It answers 403 when the member's role is
+// not in the allowed list. (403, not 404: the user is a member, so the shop's existence is no secret.)
+func RequireRole(allowed ...tenant.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		_, role := currentTenant(c)
+		if !slices.Contains(allowed, role) {
+			writeError(c, http.StatusForbidden, "forbidden", "your role cannot do this")
+			return
+		}
 		c.Next()
 	}
 }

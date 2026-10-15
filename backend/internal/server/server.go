@@ -16,6 +16,8 @@ import (
 	"mscs/internal/config"
 	"mscs/internal/database"
 	"mscs/internal/handler"
+	"mscs/internal/product"
+	"mscs/internal/tenant"
 )
 
 // maxBodyBytes caps request bodies so a client cannot exhaust memory with a huge upload.
@@ -50,6 +52,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	// Composition root: services are built here and handed to handlers (dependency injection).
 	authSvc := auth.NewService(deps.Postgres)
 	authH := handler.NewAuthHandler(authSvc)
+	productH := handler.NewProductHandler(product.NewService(deps.Postgres))
 
 	api := r.Group("/api/v1")
 	{
@@ -65,6 +68,14 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		// Routes inside one shop: the user must be a member of :tenantID.
 		shop := authed.Group("/tenants/:tenantID", handler.RequireTenantMember(authSvc))
 		shop.GET("", handler.GetTenant)
+		shop.GET("/products", productH.List)
+		shop.GET("/products/:productID", productH.Get)
+
+		// Inside one shop, but only for roles that may change the catalog.
+		managers := shop.Group("", handler.RequireRole(tenant.RoleOwner, tenant.RoleAdmin))
+		managers.POST("/products", productH.Create)
+		managers.PATCH("/products/:productID", productH.Update)
+		managers.DELETE("/products/:productID", productH.Archive)
 	}
 
 	return &http.Server{
