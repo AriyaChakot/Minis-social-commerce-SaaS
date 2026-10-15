@@ -13,9 +13,9 @@ import (
 //
 //	{"error": {"code": "email_taken", "message": "...", "details": [...]}}
 type apiError struct {
-	Code    string       `json:"code"`
-	Message string       `json:"message"`
-	Details []fieldError `json:"details,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"` // []fieldError for validation, a domain struct otherwise
 }
 
 type fieldError struct {
@@ -24,6 +24,15 @@ type fieldError struct {
 }
 
 func writeError(c *gin.Context, status int, code, message string, details ...fieldError) {
+	if len(details) == 0 {
+		writeErrorDetails(c, status, code, message, nil)
+		return
+	}
+	writeErrorDetails(c, status, code, message, details)
+}
+
+// writeErrorDetails is writeError with any JSON-serializable details (nil = no details field).
+func writeErrorDetails(c *gin.Context, status int, code, message string, details any) {
 	c.AbortWithStatusJSON(status, gin.H{"error": apiError{Code: code, Message: message, Details: details}})
 }
 

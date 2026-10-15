@@ -16,6 +16,7 @@ import (
 	"mscs/internal/config"
 	"mscs/internal/database"
 	"mscs/internal/handler"
+	"mscs/internal/order"
 	"mscs/internal/product"
 	"mscs/internal/tenant"
 )
@@ -53,6 +54,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	authSvc := auth.NewService(deps.Postgres)
 	authH := handler.NewAuthHandler(authSvc)
 	productH := handler.NewProductHandler(product.NewService(deps.Postgres))
+	orderH := handler.NewOrderHandler(order.NewService(deps.Postgres))
 
 	api := r.Group("/api/v1")
 	{
@@ -70,6 +72,10 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		shop.GET("", handler.GetTenant)
 		shop.GET("/products", productH.List)
 		shop.GET("/products/:productID", productH.Get)
+		shop.GET("/orders", orderH.List)
+		shop.GET("/orders/:orderID", orderH.Get)
+		shop.POST("/orders", orderH.Create)
+		shop.POST("/orders/:orderID/status", orderH.Transition)
 
 		// Inside one shop, but only for roles that may change the catalog.
 		managers := shop.Group("", handler.RequireRole(tenant.RoleOwner, tenant.RoleAdmin))

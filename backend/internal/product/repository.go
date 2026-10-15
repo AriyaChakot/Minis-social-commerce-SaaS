@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -75,7 +74,7 @@ func (Repository) List(ctx context.Context, db database.DBTX, tenantID uuid.UUID
 	// Arguments are always bound ($n), never concatenated into the SQL string.
 	var query *string
 	if p.Query != "" {
-		q := "%" + escapeLike(p.Query) + "%"
+		q := database.ContainsPattern(p.Query)
 		query = &q
 	}
 	rows, err := db.Query(ctx,
@@ -108,6 +107,51 @@ func (Repository) List(ctx context.Context, db database.DBTX, tenantID uuid.UUID
 	return items, nil
 }
 
+// LockForOrder loads the given products and row-locks them (SELECT ... FOR UPDATE) until the
+// transaction ends, so no other transaction can change their stock in the meantime.
+// Rows are locked in id order: two orders that share products then always lock in the same
+// order, which prevents deadlocks.
+func (Repository) LockForOrder(ctx context.Context, db database.DBTX, tenantID uuid.UUID, ids []uuid.UUID) ([]Product, error) {
+	rows, err := db.Query(ctx,
+		`SELECT `+productColumns+`
+		   FROM products
+		  WHERE tenant_id = $1 AND id = ANY($2)
+		  ORDER BY id
+		  FOR UPDATE`,
+		tenantID, ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("product: lock: %w", err)
+	}
+	defer rows.Close()
+
+	var items []Product
+	for rows.Next() {
+		p, err := scanProduct(rows)
+		if err != nil {
+			return nil, fmt.Errorf("product: scan: %w", err)
+		}
+		items = append(items, p)
+	}
+	return items, rows.Err()
+}
+
+// AdjustStock adds delta (negative to take stock out). The products_stock_non_negative CHECK
+// is the last line of defense: even a buggy caller cannot push stock below zero.
+func (Repository) AdjustStock(ctx context.Context, db database.DBTX, tenantID, id uuid.UUID, delta int) error {
+	tag, err := db.Exec(ctx,
+		`UPDATE products SET stock = stock + $3 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id, delta,
+	)
+	if err != nil {
+		return fmt.Errorf("product: adjust stock: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Update applies a partial update. COALESCE($n, column) keeps the old value when the argument
 // is NULL, i.e. when the Go pointer is nil.
 func (Repository) Update(ctx context.Context, db database.DBTX, tenantID, id uuid.UUID, in UpdateInput) (Product, error) {
@@ -124,10 +168,4 @@ func (Repository) Update(ctx context.Context, db database.DBTX, tenantID, id uui
 		tenantID, id, in.SKU, in.Name, in.Description, in.PriceSatang, in.Stock, in.Status,
 	))
 	return p, mapWriteError(err, "update")
-}
-
-// escapeLike makes user input match literally inside LIKE/ILIKE:
-// without it, searching for "50%" would treat % as "anything".
-func escapeLike(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
