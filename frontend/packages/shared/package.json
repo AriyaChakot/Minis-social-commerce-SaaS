@@ -1,0 +1,16 @@
+{
+  "name": "@mscs/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "API types and small helpers shared by every MSCS frontend app.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

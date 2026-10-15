@@ -1,0 +1,10 @@
+{
+  "name": "mscs-frontend",
+  "private": true,
+  "packageManager": "pnpm@10.34.7",
+  "scripts": {
+    "dev:merchant": "pnpm --filter @mscs/merchant dev",
+    "build:merchant": "pnpm --filter @mscs/merchant build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

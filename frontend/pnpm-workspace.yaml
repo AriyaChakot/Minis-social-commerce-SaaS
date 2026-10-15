@@ -1,0 +1,13 @@
+# One pnpm workspace for every frontend app and the code they share.
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 10 does not run dependency install scripts unless allowed here (supply-chain safety).
+# These packages need theirs to download native binaries.
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - '@tailwindcss/oxide'
+  - esbuild
+  - unrs-resolver
+  - vue-demi

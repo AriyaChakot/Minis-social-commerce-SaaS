@@ -1,0 +1,11 @@
+{
+  // Nuxt generates the real configs in .nuxt/ (run `nuxt prepare`): one each for the
+  // browser app, the server (Nitro), code shared by both, and the config files.
+  "files": [],
+  "references": [
+    { "path": "./.nuxt/tsconfig.app.json" },
+    { "path": "./.nuxt/tsconfig.server.json" },
+    { "path": "./.nuxt/tsconfig.shared.json" },
+    { "path": "./.nuxt/tsconfig.node.json" }
+  ]
+}

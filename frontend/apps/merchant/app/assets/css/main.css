@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme {
+  /* A font with proper Thai glyphs; @nuxt/fonts downloads and self-hosts it at build time. */
+  --font-sans: "IBM Plex Sans Thai", ui-sans-serif, system-ui, sans-serif;
+}
