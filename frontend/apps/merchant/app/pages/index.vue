@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import type { Role } from '@mscs/shared'
-
 useHead({ title: 'ร้านของฉัน' })
 
+// ROLE_LABEL / ROLE_COLOR come from app/utils/labels.ts (auto-imported).
 const { user, memberships } = useAuth()
-
-const ROLE_LABEL: Record<Role, string> = { owner: 'เจ้าของ', admin: 'ผู้ดูแล', staff: 'พนักงาน' }
-const ROLE_COLOR: Record<Role, 'primary' | 'info' | 'neutral'> = { owner: 'primary', admin: 'info', staff: 'neutral' }
 </script>
 
 <template>
@@ -35,8 +31,7 @@ const ROLE_COLOR: Record<Role, 'primary' | 'info' | 'neutral'> = { owner: 'prima
         </div>
 
         <template #footer>
-          <!-- Product and order pages for a shop arrive in step 9b. -->
-          <UButton block disabled color="neutral" variant="soft" icon="i-lucide-arrow-right" label="จัดการร้าน (เร็ว ๆ นี้)" />
+          <UButton block :to="`/shops/${m.tenant.id}`" trailing-icon="i-lucide-arrow-right" label="จัดการร้าน" />
         </template>
       </UCard>
     </div>
