@@ -29,14 +29,8 @@ func InTx(ctx context.Context, pool *pgxpool.Pool, scope Scope, fn func(tx pgx.T
 	// Rollback after a successful Commit is a no-op, so this is safe to defer unconditionally.
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	// Both values are always set; '' means "not set" (the policies map '' to NULL).
-	// The third argument true makes the settings local to this transaction.
-	_, err = tx.Exec(ctx,
-		`SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true)`,
-		idOrEmpty(scope.TenantID), idOrEmpty(scope.UserID),
-	)
-	if err != nil {
-		return fmt.Errorf("set rls scope: %w", err)
+	if err := SetScope(ctx, tx, scope); err != nil {
+		return err
 	}
 
 	if err := fn(tx); err != nil {
@@ -45,6 +39,22 @@ func InTx(ctx context.Context, pool *pgxpool.Pool, scope Scope, fn func(tx pgx.T
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+// SetScope replaces the RLS scope of an open transaction.
+// InTx calls it once at the start; call it again only when a single transaction must act
+// in a scope that is not known up front (e.g. registration creates the tenant, then joins it).
+func SetScope(ctx context.Context, tx pgx.Tx, scope Scope) error {
+	// Both values are always set; '' means "not set" (the policies map '' to NULL).
+	// The third argument true makes the settings local to this transaction.
+	_, err := tx.Exec(ctx,
+		`SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true)`,
+		idOrEmpty(scope.TenantID), idOrEmpty(scope.UserID),
+	)
+	if err != nil {
+		return fmt.Errorf("set rls scope: %w", err)
 	}
 	return nil
 }

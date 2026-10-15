@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"mscs/internal/database"
@@ -32,6 +33,21 @@ func (Repository) Create(ctx context.Context, db database.DBTX, email, passwordH
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("user: create: %w", err)
+	}
+	return u, nil
+}
+
+// GetByID finds a user by id.
+func (Repository) GetByID(ctx context.Context, db database.DBTX, id uuid.UUID) (User, error) {
+	u, err := scanUser(db.QueryRow(ctx,
+		`SELECT `+userColumns+` FROM users WHERE id = $1`,
+		id,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user: get by id: %w", err)
 	}
 	return u, nil
 }

@@ -54,6 +54,71 @@ func (Repository) GetBySlug(ctx context.Context, db database.DBTX, slug string) 
 	return t, nil
 }
 
+// GetByID finds a tenant by its id.
+func (Repository) GetByID(ctx context.Context, db database.DBTX, id uuid.UUID) (Tenant, error) {
+	t, err := scanTenant(db.QueryRow(ctx,
+		`SELECT `+tenantColumns+` FROM tenants WHERE id = $1`,
+		id,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tenant{}, ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("tenant: get by id: %w", err)
+	}
+	return t, nil
+}
+
+// MemberRole returns the user's role in the tenant, or ErrNotMember.
+// db must be a transaction scoped to tenantID (database.InTx), because tenant_members has RLS.
+func (Repository) MemberRole(ctx context.Context, db database.DBTX, tenantID, userID uuid.UUID) (Role, error) {
+	var role Role
+	err := db.QueryRow(ctx,
+		`SELECT role FROM tenant_members WHERE tenant_id = $1 AND user_id = $2`,
+		tenantID, userID,
+	).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotMember
+	}
+	if err != nil {
+		return "", fmt.Errorf("tenant: member role: %w", err)
+	}
+	return role, nil
+}
+
+// ListMemberships returns every tenant the user belongs to, ordered by name.
+// db must be a transaction scoped to userID (database.InTx): the member_self_read policy
+// is what lets one user see their memberships across tenants.
+func (Repository) ListMemberships(ctx context.Context, db database.DBTX, userID uuid.UUID) ([]Membership, error) {
+	rows, err := db.Query(ctx,
+		`SELECT t.id, t.slug, t.name, t.status, t.created_at, t.updated_at, m.role
+		   FROM tenant_members m
+		   JOIN tenants t ON t.id = m.tenant_id
+		  WHERE m.user_id = $1
+		  ORDER BY t.name`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("tenant: list memberships: %w", err)
+	}
+	defer rows.Close()
+
+	// Start with an empty (not nil) slice so it encodes as [] instead of null in JSON.
+	memberships := []Membership{}
+	for rows.Next() {
+		var m Membership
+		t := &m.Tenant
+		if err := rows.Scan(&t.ID, &t.Slug, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt, &m.Role); err != nil {
+			return nil, fmt.Errorf("tenant: scan membership: %w", err)
+		}
+		memberships = append(memberships, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tenant: list memberships: %w", err)
+	}
+	return memberships, nil
+}
+
 // AddMember links a user to a tenant with a role.
 // tenant_members has RLS: db must be a transaction scoped to tenantID (database.InTx).
 func (Repository) AddMember(ctx context.Context, db database.DBTX, tenantID, userID uuid.UUID, role Role) error {

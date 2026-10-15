@@ -27,9 +27,16 @@ const (
 	RoleStaff Role = "staff"
 )
 
+// Membership is one tenant a user belongs to, with their role there.
+type Membership struct {
+	Tenant Tenant `json:"tenant"`
+	Role   Role   `json:"role"`
+}
+
 // Sentinel errors: callers check them with errors.Is, without knowing anything about SQL.
 var (
 	ErrNotFound      = errors.New("tenant: not found")
 	ErrSlugTaken     = errors.New("tenant: slug already taken")
 	ErrAlreadyMember = errors.New("tenant: user is already a member")
+	ErrNotMember     = errors.New("tenant: user is not a member")
 )
