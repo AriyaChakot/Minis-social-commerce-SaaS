@@ -56,9 +56,9 @@ type UpdateInput struct {
 
 // ListParams filters and paginates the product list.
 type ListParams struct {
-	Status *Status     // nil = all statuses
-	Query  string      // case-insensitive substring of the name; "" = no filter
-	After  *uuid.UUID  // cursor: return products older than this id (nil = first page)
+	Status *Status    // nil = all statuses
+	Query  string     // case-insensitive substring of the name; "" = no filter
+	After  *uuid.UUID // cursor: return products older than this id (nil = first page)
 	Limit  int
 }
 

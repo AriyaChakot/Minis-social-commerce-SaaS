@@ -1,0 +1,120 @@
+# Runs on every push to main and on every pull request.
+# Two independent jobs (they run in parallel): the Go API and the Nuxt frontend.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The workflow only reads the repository; it needs no write access.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Go + PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres).
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: mscs
+          POSTGRES_PASSWORD: ci-superuser
+          POSTGRES_DB: mscs
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mscs -d mscs"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Read by psql and by the role script below.
+      PGHOST: localhost
+      PGPASSWORD: ci-superuser
+      POSTGRES_USER: mscs
+      POSTGRES_DB: mscs
+      APP_DB_PASSWORD: ci-app
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Same script the local docker-compose Postgres runs on first start.
+      - name: Create the restricted app role
+        run: sh ../docker/postgres/initdb/01-create-app-role.sh
+
+      - name: Run migrations
+        run: >-
+          docker run --rm --network host -v "$PWD/migrations:/migrations"
+          migrate/migrate:v4.19.0 -path=/migrations
+          -database "postgres://mscs:ci-superuser@localhost:5432/mscs?sslmode=disable" up
+
+      - name: Check formatting (gofmt)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Tests connect as mscs_app (not the superuser), so Row-Level Security is really enforced.
+      # -race also checks the concurrent stock tests for data races.
+      - name: Test
+        env:
+          DATABASE_URL: postgres://mscs_app:ci-app@localhost:5432/mscs?sslmode=disable
+        run: go test -race -count=1 ./...
+
+      - name: Build Docker image
+        run: docker build -t mscs-api:ci .
+
+  frontend:
+    name: Frontend (Nuxt)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the pnpm version pinned in frontend/package.json ("packageManager").
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # --frozen-lockfile: fail instead of silently changing versions if the lockfile is stale.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build:merchant

@@ -37,7 +37,8 @@ try {
     # Go prints progress (e.g. "go: downloading ...") to stderr; in Windows PowerShell 5.1 that
     # must not count as a script error. The exit code below is what reports failure.
     $ErrorActionPreference = 'Continue'
-    docker @dockerArgs golang:1.26-alpine go @goArgs
+    # Full Debian-based image (not alpine): it includes the C toolchain that `go test -race` needs.
+    docker @dockerArgs golang:1.26 go @goArgs
     exit $LASTEXITCODE
 }
 finally {
