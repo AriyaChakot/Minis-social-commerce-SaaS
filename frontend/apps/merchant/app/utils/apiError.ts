@@ -12,6 +12,7 @@ const MESSAGES: Record<string, string> = {
   slug_taken: 'ลิงก์ร้านนี้มีร้านอื่นใช้แล้ว',
   validation_failed: 'ข้อมูลบางช่องไม่ถูกต้อง',
   internal_error: 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง',
+  rate_limited: 'ทำรายการถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
 }
 
 /** The API's {error: {...}} body inside a $fetch error, or null for other failures. */

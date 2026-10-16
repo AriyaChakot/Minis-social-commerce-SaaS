@@ -44,3 +44,28 @@ func TestLoadWorker(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedProxies(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("MONGO_URI", "mongodb://example")
+	t.Setenv("MONGO_DB", "mscs")
+
+	t.Setenv("TRUSTED_PROXIES", " 172.16.0.0/12, 10.0.0.5 ,")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "172.16.0.0/12" || cfg.TrustedProxies[1] != "10.0.0.5" {
+		t.Fatalf("got %q", cfg.TrustedProxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "172.16.0.0/12,localhost")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), `"localhost"`) {
+		t.Fatalf("want an error naming the bad entry, got %v", err)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "")
+	if cfg, err := Load(); err != nil || cfg.TrustedProxies != nil {
+		t.Fatalf("unset: want no trusted proxies, got %q (err %v)", cfg.TrustedProxies, err)
+	}
+}

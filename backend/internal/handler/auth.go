@@ -3,10 +3,12 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"mscs/internal/auth"
+	"mscs/internal/ratelimit"
 	"mscs/internal/tenant"
 	"mscs/internal/user"
 )
@@ -14,11 +16,12 @@ import (
 // AuthHandler exposes the auth use cases over HTTP.
 // It only translates HTTP <-> service calls; the rules live in auth.Service.
 type AuthHandler struct {
-	svc *auth.Service
+	svc          *auth.Service
+	loginByEmail *ratelimit.Limiter // attempts per account, whatever IP they come from
 }
 
-func NewAuthHandler(svc *auth.Service) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *auth.Service, loginByEmail *ratelimit.Limiter) *AuthHandler {
+	return &AuthHandler{svc: svc, loginByEmail: loginByEmail}
 }
 
 // Request bodies. `binding` rules (go-playground/validator) check the shape of the input;
@@ -73,6 +76,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
+		return
+	}
+	// The per-IP limit stops one machine; this one stops many machines (a botnet) guessing the
+	// password of one account. Counted before checking the password, so guesses cost the same
+	// whether they are right or wrong.
+	if !allow(c, h.loginByEmail, "login:"+strings.ToLower(strings.TrimSpace(req.Email))) {
 		return
 	}
 

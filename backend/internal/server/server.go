@@ -18,6 +18,7 @@ import (
 	"mscs/internal/handler"
 	"mscs/internal/order"
 	"mscs/internal/product"
+	"mscs/internal/ratelimit"
 	"mscs/internal/storefront"
 	"mscs/internal/tenant"
 )
@@ -37,6 +38,11 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	useJSONNamesInValidationErrors()
 
 	r := gin.New()
+	// Which callers may tell us the real client IP. Gin's default trusts everyone, so any client
+	// could fake X-Forwarded-For; nil trusts no one, and then ClientIP is the TCP peer.
+	// (config.Load has validated the list, so this cannot fail.)
+	_ = r.SetTrustedProxies(cfg.TrustedProxies)
+	r.RemoteIPHeaders = []string{"X-Forwarded-For"}
 	r.Use(gin.Logger())   // log every request
 	r.Use(gin.Recovery()) // turn a panic into a 500 response instead of crashing the process
 	r.Use(func(c *gin.Context) {
@@ -52,8 +58,18 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	r.GET("/readyz", health.Ready)
 
 	// Composition root: services are built here and handed to handlers (dependency injection).
+	// Rate limits (token buckets, see package ratelimit): burst, then one more per interval.
+	// Strict where a request is expensive or abusable: login runs Argon2 (slow on purpose) and
+	// invites password guessing; a guest order reserves stock. Generous for public reads.
+	var (
+		authByIP        = ratelimit.New(10, 6*time.Second) // ~10 per minute
+		loginByEmail    = ratelimit.New(5, time.Minute)    // 5 tries, then 1 per minute
+		guestOrderByIP  = ratelimit.New(5, 2*time.Minute)  // 5 orders, then 1 per 2 minutes
+		publicReadsByIP = ratelimit.New(60, time.Second/2) // ~120 per minute
+	)
+
 	authSvc := auth.NewService(deps.Postgres)
-	authH := handler.NewAuthHandler(authSvc)
+	authH := handler.NewAuthHandler(authSvc, loginByEmail)
 	productSvc := product.NewService(deps.Postgres)
 	orderSvc := order.NewService(deps.Postgres)
 	productH := handler.NewProductHandler(productSvc)
@@ -63,15 +79,17 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	api := r.Group("/api/v1")
 	{
 		// Public routes.
-		api.POST("/auth/register", authH.Register)
-		api.POST("/auth/login", authH.Login)
+		limitAuth := handler.RateLimitByIP(authByIP)
+		api.POST("/auth/register", limitAuth, authH.Register)
+		api.POST("/auth/login", limitAuth, authH.Login)
 
 		// Customer-facing storefront: no login, the shop is chosen by its slug.
 		store := api.Group("/public/shops/:slug")
-		store.GET("", storeH.Shop)
-		store.GET("/products", storeH.Products)
-		store.POST("/orders", storeH.PlaceOrder)
-		store.GET("/orders/:token", storeH.TrackOrder)
+		limitReads := handler.RateLimitByIP(publicReadsByIP)
+		store.GET("", limitReads, storeH.Shop)
+		store.GET("/products", limitReads, storeH.Products)
+		store.POST("/orders", handler.RateLimitByIP(guestOrderByIP), storeH.PlaceOrder)
+		store.GET("/orders/:token", limitReads, storeH.TrackOrder)
 
 		// Routes for any logged-in user.
 		authed := api.Group("", handler.RequireAuth(authSvc))

@@ -15,6 +15,10 @@ services:
       MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
       MONGO_DB: ${MONGO_DB}
       ORDER_PAYMENT_WINDOW: ${ORDER_PAYMENT_WINDOW:-24h}
+      # The Nuxt and SvelteKit dev servers run on the host and reach the API through Docker's
+      # gateway (172.x.0.1), so that range may forward the real client IP. In production, list
+      # only the frontend servers' addresses.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:

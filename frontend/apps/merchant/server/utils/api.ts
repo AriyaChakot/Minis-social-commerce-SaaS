@@ -45,6 +45,12 @@ export async function callApi<T>(event: H3Event, path: string, opts: ApiCallOpti
   const token = getCookie(event, SESSION_COOKIE)
 
   const headers: Record<string, string> = { accept: 'application/json' }
+  // The Go API rate-limits per client IP; without this, every merchant would share this server's
+  // address. In production getRequestIP reads the TCP peer, which a client cannot fake.
+  // Under `nuxt dev` this code runs behind Nitro's own dev proxy on a local pipe (no IP at all),
+  // and that proxy passes the browser's address on in X-Forwarded-For: trust it in dev only.
+  const ip = getRequestIP(event, { xForwardedFor: import.meta.dev })
+  if (ip) headers['x-forwarded-for'] = ip
   if (token) headers.authorization = `Bearer ${token}`
   if (opts.body !== undefined) headers['content-type'] = opts.contentType ?? 'application/json'
 

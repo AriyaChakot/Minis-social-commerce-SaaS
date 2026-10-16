@@ -112,6 +112,13 @@ its own transaction under a row lock, and re-checked there, so an order the merc
 moment is never cancelled (a test reproduces exactly that race). Finding expired orders across all shops goes
 through a narrow `SECURITY DEFINER` function that returns ids only; every write still runs under the shop's RLS scope.
 
+**Rate limiting that counts the right client.** Token buckets per client IP (strict for login and guest orders,
+generous for public reads) plus a per-account limit on login, so a botnet cannot guess one account's password from
+many IPs. Requests reach the API through the Nuxt/SvelteKit servers, so the API would see one address for everyone:
+the frontends forward the browser's address in `X-Forwarded-For`, and the API trusts that header only from the
+configured `TRUSTED_PROXIES` (Gin trusts every proxy by default, which lets any client fake its IP). IPv6 clients are
+keyed by `/64`. Refusals are `429` with `Retry-After`. Buckets are in memory, so each API replica counts on its own.
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -225,7 +232,7 @@ scripts/                developer helpers
 - [x] Customer storefront and guest checkout (SvelteKit)
 - [ ] Chat inbox for LINE / Facebook messages (MongoDB, webhooks)
 - [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
-- [ ] Rate limiting on public endpoints (guest orders) and login
+- [x] Rate limiting on login, registration and the public storefront API
 - [ ] Platform admin console (React)
 - [ ] Staff invitations, shipping fees for storefront orders, product photos
 

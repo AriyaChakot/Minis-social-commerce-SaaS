@@ -1,12 +1,12 @@
-import { error, fail, redirect } from '@sveltejs/kit'
+import { fail, redirect } from '@sveltejs/kit'
 import type { PlaceOrderRequest, PlaceOrderResponse, StorefrontProduct } from '@mscs/shared'
-import { api } from '#lib/server/api.ts'
+import { api, loadFailed } from '#lib/server/api.ts'
 import type { Actions, PageServerLoad } from './$types'
 
 // Current products, to show names and today's prices for the cart lines.
 export const load: PageServerLoad = async ({ params }) => {
   const res = await api<{ items: StorefrontProduct[] }>(`/public/shops/${encodeURIComponent(params.slug)}/products`)
-  if (!res.ok) error(res.status === 404 ? 404 : 503, { message: res.status === 404 ? 'ไม่พบร้านค้านี้' : 'ระบบขัดข้องชั่วคราว' })
+  if (!res.ok) loadFailed(res)
   return { products: res.data.items }
 }
 

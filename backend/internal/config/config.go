@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ type Config struct {
 	// PaymentWindow: how long a storefront order may stay unpaid before the worker cancels it.
 	// The API needs it too, to show customers their payment deadline.
 	PaymentWindow time.Duration
+
+	// TrustedProxies: addresses or CIDR ranges of the servers allowed to tell the API the real
+	// client IP (X-Forwarded-For): our Nuxt and SvelteKit servers. Empty = trust nobody.
+	TrustedProxies []string
 }
 
 // WorkerConfig holds the settings of the background worker (cmd/worker).
@@ -56,7 +61,28 @@ func Load() (Config, error) {
 	if cfg.PaymentWindow, err = paymentWindow(); err != nil {
 		return Config{}, err
 	}
+	if cfg.TrustedProxies, err = getAddrList("TRUSTED_PROXIES"); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// getAddrList parses a comma-separated list of IP addresses and CIDR ranges.
+func getAddrList(key string) ([]string, error) {
+	var list []string
+	for _, item := range strings.Split(os.Getenv(key), ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		_, errPrefix := netip.ParsePrefix(item)
+		_, errAddr := netip.ParseAddr(item)
+		if errPrefix != nil && errAddr != nil {
+			return nil, fmt.Errorf("config: %s: %q is not an IP address or CIDR range", key, item)
+		}
+		list = append(list, item)
+	}
+	return list, nil
 }
 
 // LoadWorker reads the worker's settings. It needs only PostgreSQL.

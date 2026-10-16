@@ -49,6 +49,8 @@ export function orderErrorMessage(error: ApiErrorBody['error'] | undefined, prod
       return 'กรุณากรอกข้อมูลให้ครบถ้วน'
     case 'api_unavailable':
       return 'ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง'
+    case 'rate_limited':
+      return 'มีการสั่งซื้อถี่เกินไป กรุณารอสักครู่แล้วลองใหม่'
     default:
       return 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
   }
