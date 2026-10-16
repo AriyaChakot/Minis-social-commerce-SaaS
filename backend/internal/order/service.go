@@ -2,9 +2,12 @@ package order
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -215,7 +218,64 @@ func (s *Service) Transition(ctx context.Context, tenantID, id uuid.UUID, to Sta
 	if to == StatusCancelled && actorRole == tenant.RoleStaff {
 		return Order{}, ErrCancelForbidden
 	}
+	var reason *CancelReason
+	if to == StatusCancelled {
+		r := CancelByMerchant
+		reason = &r
+	}
+	return s.transition(ctx, tenantID, id, to, reason, nil)
+}
 
+// ExpireLimit caps how many orders one ExpireUnpaid call handles; the next run takes the rest.
+const ExpireLimit = 100
+
+// ExpireUnpaid cancels storefront orders that are still pending although they were placed
+// before cutoff, and puts their stock back. It returns how many orders it cancelled.
+//
+// Each order is cancelled in its own transaction and tenant scope, so one failure does not undo
+// the others; failures are collected and returned together. Merchant-entered orders (chat,
+// manual) never expire: the merchant has talked to that customer and decides.
+func (s *Service) ExpireUnpaid(ctx context.Context, cutoff time.Time) (int, error) {
+	refs, err := s.repo.ExpiredStorefront(ctx, s.pool, cutoff, ExpireLimit)
+	if err != nil {
+		return 0, err
+	}
+
+	reason := CancelPaymentTimeout
+	// Re-checked under the row lock: between the search above and the lock, the merchant may
+	// have marked the order as paid. Without this check the worker would cancel a paid order
+	// (paid -> cancelled is a valid transition for a merchant).
+	stillExpired := func(o Order) error {
+		if o.Status != StatusPending || o.Channel != ChannelStorefront || !o.CreatedAt.Before(cutoff) {
+			return errNoLongerExpired
+		}
+		return nil
+	}
+
+	var cancelled int
+	var errs []error
+	for _, ref := range refs {
+		if ctx.Err() != nil { // shutting down: stop between orders, never in the middle of one
+			break
+		}
+		_, err := s.transition(ctx, ref.TenantID, ref.ID, StatusCancelled, &reason, stillExpired)
+		switch {
+		case err == nil:
+			cancelled++
+		case errors.Is(err, errNoLongerExpired):
+			// Paid (or otherwise handled) in the meantime: nothing to do.
+		default:
+			errs = append(errs, fmt.Errorf("order %s: %w", ref.ID, err))
+		}
+	}
+	return cancelled, errors.Join(errs...)
+}
+
+var errNoLongerExpired = errors.New("order: no longer expired")
+
+// transition is the one place that changes an order's status. check, if not nil, runs on the
+// locked row before anything changes; an error from it aborts the transition.
+func (s *Service) transition(ctx context.Context, tenantID, id uuid.UUID, to Status, reason *CancelReason, check func(Order) error) (Order, error) {
 	var updated Order
 	err := s.inTenant(ctx, tenantID, func(tx pgx.Tx) error {
 		// Lock the order row first: a second, concurrent "cancel" waits here, then sees
@@ -223,6 +283,11 @@ func (s *Service) Transition(ctx context.Context, tenantID, id uuid.UUID, to Sta
 		current, err := s.repo.Get(ctx, tx, tenantID, id, true)
 		if err != nil {
 			return err
+		}
+		if check != nil {
+			if err := check(current); err != nil {
+				return err
+			}
 		}
 		if !current.Status.CanBecome(to) {
 			return &TransitionError{From: current.Status, To: to}
@@ -240,7 +305,7 @@ func (s *Service) Transition(ctx context.Context, tenantID, id uuid.UUID, to Sta
 			}
 		}
 
-		if updated, err = s.repo.SetStatus(ctx, tx, tenantID, id, to); err != nil {
+		if updated, err = s.repo.SetStatus(ctx, tx, tenantID, id, to, reason); err != nil {
 			return err
 		}
 		updated.Items = items

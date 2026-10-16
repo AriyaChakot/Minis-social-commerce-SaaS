@@ -52,6 +52,13 @@
     </div>
   {/if}
 
+  {#if data.order.status === 'pending' && data.order.pay_by}
+    <div class="rounded-2xl border border-stone-200 bg-white p-4 text-sm">
+      <p class="font-medium">กรุณาชำระเงินภายใน {formatDateTime(data.order.pay_by)}</p>
+      <p class="text-stone-500">หากยังไม่ได้ชำระเงินภายในเวลานี้ คำสั่งซื้อจะถูกยกเลิกโดยอัตโนมัติ</p>
+    </div>
+  {/if}
+
   <div class="rounded-2xl border border-stone-200 bg-white p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
@@ -66,7 +73,12 @@
 
     {#if data.order.status === 'cancelled'}
       <p class="mt-4 rounded-xl bg-stone-100 px-3 py-2 text-sm text-stone-600">
-        คำสั่งซื้อนี้ถูกยกเลิกเมื่อ {formatDateTime(data.order.cancelled_at!)}
+        {#if data.order.cancel_reason === 'payment_timeout'}
+          คำสั่งซื้อนี้ถูกยกเลิกอัตโนมัติเมื่อ {formatDateTime(data.order.cancelled_at!)} เนื่องจากไม่ได้ชำระเงินภายในเวลาที่กำหนด
+          หากยังต้องการสินค้า สั่งซื้อใหม่ได้ที่หน้าร้าน
+        {:else}
+          คำสั่งซื้อนี้ถูกยกเลิกเมื่อ {formatDateTime(data.order.cancelled_at!)}
+        {/if}
       </p>
     {:else}
       <ol class="mt-5 grid grid-cols-4 gap-1 text-center text-xs">

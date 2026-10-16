@@ -55,7 +55,7 @@ const timeline = computed(() => {
     { label: 'ชำระเงิน', at: o.paid_at },
     { label: 'จัดส่ง', at: o.shipped_at },
     { label: 'สำเร็จ', at: o.completed_at },
-    { label: 'ยกเลิก', at: o.cancelled_at },
+    { label: o.cancel_reason === 'payment_timeout' ? 'ยกเลิกอัตโนมัติ (ไม่ชำระเงินตามกำหนด)' : 'ยกเลิก', at: o.cancelled_at },
   ].filter(step => step.at !== null) as { label: string; at: string }[]
 })
 </script>

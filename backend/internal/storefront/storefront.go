@@ -57,6 +57,9 @@ type Order struct {
 	ShippedAt         *time.Time   `json:"shipped_at"`
 	CompletedAt       *time.Time   `json:"completed_at"`
 	CancelledAt       *time.Time   `json:"cancelled_at"`
+	// PayBy is the payment deadline while the order is pending; after it the order is cancelled.
+	PayBy        *time.Time          `json:"pay_by"`
+	CancelReason *order.CancelReason `json:"cancel_reason"`
 }
 
 type PlaceOrderInput struct {
@@ -70,14 +73,15 @@ type PlaceOrderInput struct {
 // ---- Service ----
 
 type Service struct {
-	pool     *pgxpool.Pool
-	tenants  tenant.Repository
-	products *product.Service
-	orders   *order.Service
+	pool          *pgxpool.Pool
+	tenants       tenant.Repository
+	products      *product.Service
+	orders        *order.Service
+	paymentWindow time.Duration // must match the worker's, see config.PaymentWindow
 }
 
-func NewService(pool *pgxpool.Pool, products *product.Service, orders *order.Service) *Service {
-	return &Service{pool: pool, products: products, orders: orders}
+func NewService(pool *pgxpool.Pool, products *product.Service, orders *order.Service, paymentWindow time.Duration) *Service {
+	return &Service{pool: pool, products: products, orders: orders, paymentWindow: paymentWindow}
 }
 
 // shop resolves a slug to an active tenant. tenants has no RLS, so the pool is enough;
@@ -142,7 +146,7 @@ func (s *Service) PlaceOrder(ctx context.Context, slug string, in PlaceOrderInpu
 	if err != nil {
 		return Order{}, "", err
 	}
-	return publicOrder(o), token, nil
+	return s.publicOrder(o), token, nil
 }
 
 // TrackOrder shows a guest order to whoever holds its tracking token.
@@ -155,10 +159,10 @@ func (s *Service) TrackOrder(ctx context.Context, slug, token string) (Order, er
 	if err != nil {
 		return Order{}, err
 	}
-	return publicOrder(o), nil
+	return s.publicOrder(o), nil
 }
 
-func publicOrder(o order.Order) Order {
+func (s *Service) publicOrder(o order.Order) Order {
 	lines := make([]OrderLine, len(o.Items))
 	for i, it := range o.Items {
 		lines[i] = OrderLine{
@@ -167,6 +171,11 @@ func publicOrder(o order.Order) Order {
 			Quantity:        it.Quantity,
 			LineTotalSatang: it.LineTotalSatang,
 		}
+	}
+	var payBy *time.Time
+	if o.Status == order.StatusPending {
+		t := o.CreatedAt.Add(s.paymentWindow)
+		payBy = &t
 	}
 	return Order{
 		OrderNumber:       o.OrderNumber,
@@ -181,5 +190,7 @@ func publicOrder(o order.Order) Order {
 		ShippedAt:         o.ShippedAt,
 		CompletedAt:       o.CompletedAt,
 		CancelledAt:       o.CancelledAt,
+		PayBy:             payBy,
+		CancelReason:      o.CancelReason,
 	}
 }

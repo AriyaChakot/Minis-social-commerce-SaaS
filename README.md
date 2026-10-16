@@ -35,6 +35,8 @@ run against a real database.
 - **Merchant admin web app** — server-rendered Nuxt app with form validation, toasts, confirmation dialogs.
 - **Customer storefront** — SvelteKit app at `/s/<shop-slug>`: product grid, cart, guest checkout, and a private
   tracking page that shows the order's progress as the merchant updates it.
+- **Background worker** — cancels storefront orders left unpaid past a payment window (the stock goes back on sale;
+  the customer sees the deadline and the reason), and deletes expired sessions. Runs safely with several replicas.
 
 ## Architecture
 
@@ -47,12 +49,14 @@ flowchart LR
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
     G -. "health / future chat inbox" .-> M[(MongoDB 8)]
     MG[golang-migrate] -- "schema owner role" --> P
+    W[Go worker<br/>leader-elected] -- "advisory lock + jobs<br/>role mscs_app" --> P
 ```
 
 Browsers never call the Go API directly: each frontend has its own server (Nuxt / SvelteKit) that does.
 
-The Go API is a **modular monolith**: one deployable, organised by business domain
-(`auth`, `tenant`, `user`, `product`, `order`), each with its own model, repository and service.
+The backend is a **modular monolith**: one code base and one Docker image with two programs (`cmd/api`,
+`cmd/worker`), organised by business domain (`auth`, `tenant`, `user`, `product`, `order`), each with its own
+model, repository and service.
 Handlers translate HTTP; services hold the business rules; repositories hold the SQL.
 
 ## Tech stack
@@ -100,6 +104,14 @@ decides prices, channel and shipping fee. Checkout is a SvelteKit form action (w
 protected by SvelteKit's origin check); the tracking page sends `Cache-Control: private, no-store` and a
 `no-referrer` policy, so the secret URL is neither cached nor leaked to other sites.
 
+**Background jobs with leader election.** The worker can run as several replicas for availability, but only one
+does the work: whoever holds a PostgreSQL session-level advisory lock (`pg_try_advisory_lock`) is the leader, and
+Postgres frees the lock the moment that process dies, so a follower takes over within seconds — no etcd or Redis.
+Leadership only prevents duplicate work; correctness comes from the database: each expired order is cancelled in
+its own transaction under a row lock, and re-checked there, so an order the merchant marks as paid at the same
+moment is never cancelled (a test reproduces exactly that race). Finding expired orders across all shops goes
+through a narrow `SECURITY DEFINER` function that returns ids only; every write still runs under the shop's RLS scope.
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -112,7 +124,7 @@ not a member of, graceful shutdown, liveness vs readiness probes, request body s
 # 1. Configuration: copy the example and change every password
 cp .env.example .env
 
-# 2. Start PostgreSQL, MongoDB and the Go API (http://localhost:8080)
+# 2. Start PostgreSQL, MongoDB, the Go API (http://localhost:8080) and the background worker
 docker compose up -d --build
 
 # 3. Create the database schema
@@ -188,13 +200,15 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 
 ```
 backend/
-  cmd/api/              entry point: config, DB connections, graceful shutdown
+  cmd/api/              API entry point: config, DB connections, graceful shutdown
+  cmd/worker/           background worker entry point
   internal/
     auth/               passwords (Argon2id), sessions, auth use cases
     tenant/ user/       shops, memberships, users
     product/ order/     catalog, stock, orders and their state machine
     storefront/         public, customer-facing use cases and view types
     securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
+    leader/ worker/     leader election (advisory lock), periodic jobs
     database/           pool, RLS-scoped transactions (InTx), shared helpers
     handler/ server/    HTTP handlers, middleware, routes
   migrations/           SQL migrations (golang-migrate)
@@ -210,8 +224,7 @@ scripts/                developer helpers
 
 - [x] Customer storefront and guest checkout (SvelteKit)
 - [ ] Chat inbox for LINE / Facebook messages (MongoDB, webhooks)
-- [ ] Background worker: expire unpaid orders (also frees stock held by abandoned guest orders), clean up
-      sessions (leader election via Postgres advisory locks)
+- [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
 - [ ] Rate limiting on public endpoints (guest orders) and login
 - [ ] Platform admin console (React)
 - [ ] Staff invitations, shipping fees for storefront orders, product photos

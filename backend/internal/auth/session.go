@@ -64,3 +64,18 @@ func (sessionStore) delete(ctx context.Context, db database.DBTX, tokenHash []by
 	}
 	return nil
 }
+
+// deleteExpired removes up to limit sessions that expired before cutoff and reports how many.
+// Deleting in small batches keeps each statement short, so it never holds locks or bloats the
+// write-ahead log the way one huge DELETE of millions of rows would.
+func (sessionStore) deleteExpired(ctx context.Context, db database.DBTX, cutoff time.Time, limit int) (int64, error) {
+	tag, err := db.Exec(ctx,
+		`DELETE FROM sessions
+		  WHERE id IN (SELECT id FROM sessions WHERE expires_at < $1 LIMIT $2)`,
+		cutoff, limit,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("session: delete expired: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

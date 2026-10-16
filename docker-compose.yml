@@ -1,4 +1,4 @@
-# Local development stack: Go API + PostgreSQL + MongoDB.
+# Local development stack: Go API + background worker + PostgreSQL + MongoDB.
 # Values like ${POSTGRES_USER} are read from the .env file next to this file.
 
 name: mscs
@@ -14,12 +14,28 @@ services:
       DATABASE_URL: postgres://mscs_app:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
       MONGO_DB: ${MONGO_DB}
+      ORDER_PAYMENT_WINDOW: ${ORDER_PAYMENT_WINDOW:-24h}
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       mongo:
+        condition: service_healthy
+
+  # Background jobs (expire unpaid storefront orders, delete expired sessions).
+  # Same image as the API, different program. Safe to scale: `docker compose up -d --scale worker=2`
+  # starts two, but only the elected leader (a Postgres advisory lock) runs the jobs.
+  worker:
+    build:
+      context: ./backend
+    entrypoint: ["/app/worker"]
+    environment:
+      DATABASE_URL: postgres://mscs_app:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      WORKER_INTERVAL: ${WORKER_INTERVAL:-1m}
+      ORDER_PAYMENT_WINDOW: ${ORDER_PAYMENT_WINDOW:-24h}
+    depends_on:
+      postgres:
         condition: service_healthy
 
   postgres:

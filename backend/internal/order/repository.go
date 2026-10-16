@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,13 +18,13 @@ type Repository struct{}
 
 const orderColumns = `id, tenant_id, order_number, customer_name, customer_phone, shipping_address,
 	channel, note, status, subtotal_satang, shipping_fee_satang, total_satang, created_by,
-	paid_at, shipped_at, completed_at, cancelled_at, created_at, updated_at`
+	paid_at, shipped_at, completed_at, cancelled_at, cancel_reason, created_at, updated_at`
 
 func scanOrder(row pgx.Row) (Order, error) {
 	var o Order
 	err := row.Scan(&o.ID, &o.TenantID, &o.OrderNumber, &o.CustomerName, &o.CustomerPhone, &o.ShippingAddress,
 		&o.Channel, &o.Note, &o.Status, &o.SubtotalSatang, &o.ShippingFeeSatang, &o.TotalSatang, &o.CreatedBy,
-		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CreatedAt, &o.UpdatedAt)
+		&o.PaidAt, &o.ShippedAt, &o.CompletedAt, &o.CancelledAt, &o.CancelReason, &o.CreatedAt, &o.UpdatedAt)
 	return o, err
 }
 
@@ -171,21 +172,48 @@ func (Repository) List(ctx context.Context, db database.DBTX, tenantID uuid.UUID
 }
 
 // SetStatus moves the order to a new status and stamps the matching *_at column.
+// reason must be set when to is cancelled, and nil otherwise (a CHECK constraint enforces it).
 // The caller must have checked the transition (Status.CanBecome) under a row lock.
-func (Repository) SetStatus(ctx context.Context, db database.DBTX, tenantID, id uuid.UUID, to Status) (Order, error) {
+func (Repository) SetStatus(ctx context.Context, db database.DBTX, tenantID, id uuid.UUID, to Status, reason *CancelReason) (Order, error) {
 	o, err := scanOrder(db.QueryRow(ctx,
 		`UPDATE orders SET
-		     status       = $3,
+		     status        = $3,
+		     cancel_reason = $4,
 		     paid_at      = CASE WHEN $3 = 'paid'      THEN now() ELSE paid_at      END,
 		     shipped_at   = CASE WHEN $3 = 'shipped'   THEN now() ELSE shipped_at   END,
 		     completed_at = CASE WHEN $3 = 'completed' THEN now() ELSE completed_at END,
 		     cancelled_at = CASE WHEN $3 = 'cancelled' THEN now() ELSE cancelled_at END
 		  WHERE tenant_id = $1 AND id = $2
 		  RETURNING `+orderColumns,
-		tenantID, id, to,
+		tenantID, id, to, reason,
 	))
 	if err != nil {
 		return Order{}, fmt.Errorf("order: set status: %w", err)
 	}
 	return o, nil
+}
+
+// Ref points at one order in one shop.
+type Ref struct {
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+// ExpiredStorefront lists pending storefront orders created before cutoff, in ALL shops, oldest
+// first. It calls the SECURITY DEFINER function from migration 000010, the only query that may
+// look across shops; it returns ids only, and db needs no tenant scope.
+func (Repository) ExpiredStorefront(ctx context.Context, db database.DBTX, cutoff time.Time, limit int) ([]Ref, error) {
+	rows, err := db.Query(ctx, `SELECT tenant_id, order_id FROM expired_storefront_orders($1, $2)`, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("order: expired storefront orders: %w", err)
+	}
+	refs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Ref, error) {
+		var r Ref
+		err := row.Scan(&r.TenantID, &r.ID)
+		return r, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("order: scan expired: %w", err)
+	}
+	return refs, nil
 }

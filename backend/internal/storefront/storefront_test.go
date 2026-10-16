@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,7 +39,7 @@ func TestStorefront(t *testing.T) {
 	pool := dbtest.Pool(t)
 	products := product.NewService(pool)
 	orders := order.NewService(pool)
-	svc := storefront.NewService(pool, products, orders)
+	svc := storefront.NewService(pool, products, orders, 24*time.Hour)
 
 	shop := newShop(t, ctx, pool)
 	other := newShop(t, ctx, pool)
@@ -92,6 +93,10 @@ func TestStorefront(t *testing.T) {
 		got, err := svc.TrackOrder(ctx, shop.Slug, token)
 		if err != nil || got.OrderNumber != placed.OrderNumber || len(got.Items) != 1 {
 			t.Fatalf("track: got %+v err=%v", got, err)
+		}
+		// Pending: the customer sees when they must pay by.
+		if got.PayBy == nil || !got.PayBy.Equal(got.CreatedAt.Add(24*time.Hour)) || got.CancelReason != nil {
+			t.Fatalf("want pay_by = created_at + 24h and no cancel reason, got %v / %v", got.PayBy, got.CancelReason)
 		}
 	})
 

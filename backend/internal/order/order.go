@@ -12,26 +12,27 @@ import (
 
 // Order is one customer purchase in one shop.
 type Order struct {
-	ID                uuid.UUID  `json:"id"`
-	TenantID          uuid.UUID  `json:"tenant_id"`
-	OrderNumber       int64      `json:"order_number"` // human-friendly, per shop: 1001, 1002, ...
-	CustomerName      string     `json:"customer_name"`
-	CustomerPhone     string     `json:"customer_phone"`
-	ShippingAddress   string     `json:"shipping_address"`
-	Channel           Channel    `json:"channel"`
-	Note              string     `json:"note"`
-	Status            Status     `json:"status"`
-	SubtotalSatang    int64      `json:"subtotal_satang"`
-	ShippingFeeSatang int64      `json:"shipping_fee_satang"`
-	TotalSatang       int64      `json:"total_satang"`
-	CreatedBy         *uuid.UUID `json:"created_by"`
-	PaidAt            *time.Time `json:"paid_at"`
-	ShippedAt         *time.Time `json:"shipped_at"`
-	CompletedAt       *time.Time `json:"completed_at"`
-	CancelledAt       *time.Time `json:"cancelled_at"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Items             []Item     `json:"items,omitempty"` // filled by Get/Create, left out of lists
+	ID                uuid.UUID     `json:"id"`
+	TenantID          uuid.UUID     `json:"tenant_id"`
+	OrderNumber       int64         `json:"order_number"` // human-friendly, per shop: 1001, 1002, ...
+	CustomerName      string        `json:"customer_name"`
+	CustomerPhone     string        `json:"customer_phone"`
+	ShippingAddress   string        `json:"shipping_address"`
+	Channel           Channel       `json:"channel"`
+	Note              string        `json:"note"`
+	Status            Status        `json:"status"`
+	SubtotalSatang    int64         `json:"subtotal_satang"`
+	ShippingFeeSatang int64         `json:"shipping_fee_satang"`
+	TotalSatang       int64         `json:"total_satang"`
+	CreatedBy         *uuid.UUID    `json:"created_by"`
+	PaidAt            *time.Time    `json:"paid_at"`
+	ShippedAt         *time.Time    `json:"shipped_at"`
+	CompletedAt       *time.Time    `json:"completed_at"`
+	CancelledAt       *time.Time    `json:"cancelled_at"`
+	CancelReason      *CancelReason `json:"cancel_reason"` // set exactly when Status is cancelled
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
+	Items             []Item        `json:"items,omitempty"` // filled by Get/Create, left out of lists
 }
 
 // Item is one order line. Name, SKU and price are a snapshot taken when the order was placed.
@@ -86,6 +87,14 @@ var transitions = map[Status][]Status{
 func (s Status) CanBecome(next Status) bool {
 	return slices.Contains(transitions[s], next)
 }
+
+// CancelReason says who or what cancelled an order.
+type CancelReason string
+
+const (
+	CancelByMerchant     CancelReason = "merchant"        // a shop member cancelled it
+	CancelPaymentTimeout CancelReason = "payment_timeout" // unpaid storefront order, expired by the worker
+)
 
 // CreateInput is a new order as entered by a merchant (or, later, the storefront).
 type CreateInput struct {

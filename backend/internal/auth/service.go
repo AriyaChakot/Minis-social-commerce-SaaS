@@ -198,3 +198,20 @@ func (s *Service) createSession(ctx context.Context, db database.DBTX, userID uu
 	}
 	return Session{Token: token, ExpiresAt: expiresAt}, nil
 }
+
+// sessionCleanupBatch is how many expired sessions one DELETE removes.
+const sessionCleanupBatch = 1000
+
+// DeleteExpiredSessions removes sessions that can no longer be used. Expired sessions are already
+// rejected on every request (expires_at > now()); this only keeps the table from growing forever.
+func (s *Service) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	cutoff := s.now()
+	var total int64
+	for {
+		n, err := s.sessions.deleteExpired(ctx, s.pool, cutoff, sessionCleanupBatch)
+		total += n
+		if err != nil || n < sessionCleanupBatch {
+			return total, err
+		}
+	}
+}

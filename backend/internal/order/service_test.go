@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -237,8 +238,12 @@ func TestTransitions(t *testing.T) {
 	t.Run("cancel puts stock back exactly once", func(t *testing.T) {
 		o := place(t)
 		before := f.stock(t, f.shop, shirt.ID)
-		if _, err := f.orders.Transition(f.ctx, f.shop, o.ID, order.StatusCancelled, tenant.RoleOwner); err != nil {
+		cancelled, err := f.orders.Transition(f.ctx, f.shop, o.ID, order.StatusCancelled, tenant.RoleOwner)
+		if err != nil {
 			t.Fatalf("cancel: %v", err)
+		}
+		if cancelled.CancelReason == nil || *cancelled.CancelReason != order.CancelByMerchant {
+			t.Fatalf("want cancel reason %q, got %v", order.CancelByMerchant, cancelled.CancelReason)
 		}
 		var terr *order.TransitionError
 		if _, err := f.orders.Transition(f.ctx, f.shop, o.ID, order.StatusCancelled, tenant.RoleOwner); !errors.As(err, &terr) {
@@ -329,4 +334,130 @@ func TestConcurrentCancelReturnsStockOnce(t *testing.T) {
 	if s := f.stock(t, f.shop, p.ID); s != 10 {
 		t.Fatalf("stock: want 10 (returned once), got %d", s)
 	}
+}
+
+// TestExpireUnpaid checks which orders the worker's expiry job cancels.
+//
+// The job looks across ALL shops, and the tests share one database (possibly with dev data), so
+// the test orders are backdated to the year 2000 and the cutoff is 2000-01-02: no real order can
+// be that old, so the test never touches anything but its own orders.
+func TestExpireUnpaid(t *testing.T) {
+	f := setup(t)
+	tee := f.newProduct(t, f.shop, "Tee", 1000, 100)
+	cutoff := time.Date(2000, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	guest := func(t *testing.T) order.Order {
+		t.Helper()
+		in := f.order(order.ItemInput{ProductID: tee.ID, Quantity: 3})
+		in.Channel = order.ChannelStorefront
+		o, _, err := f.orders.PlaceGuestOrder(f.ctx, f.shop, in)
+		if err != nil {
+			t.Fatalf("place guest order: %v", err)
+		}
+		return o
+	}
+	backdate := func(t *testing.T, o order.Order) {
+		t.Helper()
+		err := database.InTx(f.ctx, f.pool, database.Scope{TenantID: f.shop}, func(tx pgx.Tx) error {
+			_, err := tx.Exec(f.ctx, `UPDATE orders SET created_at = '2000-01-01' WHERE id = $1`, o.ID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+	}
+	get := func(t *testing.T, o order.Order) order.Order {
+		t.Helper()
+		got, err := f.orders.Get(f.ctx, f.shop, o.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		return got
+	}
+
+	t.Run("only old, unpaid storefront orders expire", func(t *testing.T) {
+		expired := guest(t)
+		backdate(t, expired)
+
+		recent := guest(t) // placed just now: still inside its payment window
+
+		paid := guest(t)
+		backdate(t, paid)
+		if _, err := f.orders.Transition(f.ctx, f.shop, paid.ID, order.StatusPaid, tenant.RoleStaff); err != nil {
+			t.Fatalf("pay: %v", err)
+		}
+
+		manual, err := f.orders.Create(f.ctx, f.shop, f.user, f.order(order.ItemInput{ProductID: tee.ID, Quantity: 3}))
+		if err != nil {
+			t.Fatalf("create manual: %v", err)
+		}
+		backdate(t, manual) // merchant-entered orders never expire, however old
+
+		before := f.stock(t, f.shop, tee.ID)
+		n, err := f.orders.ExpireUnpaid(f.ctx, cutoff)
+		if err != nil || n != 1 {
+			t.Fatalf("want 1 order expired, got %d (err %v)", n, err)
+		}
+
+		got := get(t, expired)
+		if got.Status != order.StatusCancelled || got.CancelReason == nil || *got.CancelReason != order.CancelPaymentTimeout {
+			t.Fatalf("expired order: want cancelled/payment_timeout, got %s/%v", got.Status, got.CancelReason)
+		}
+		if after := f.stock(t, f.shop, tee.ID); after != before+3 {
+			t.Fatalf("stock: want %d back on the shelf, got %d", before+3, after)
+		}
+		for _, o := range []order.Order{recent, paid, manual} {
+			if s := get(t, o).Status; s == order.StatusCancelled {
+				t.Fatalf("order #%d (%s) must not expire", o.OrderNumber, o.Channel)
+			}
+		}
+
+		if n, err := f.orders.ExpireUnpaid(f.ctx, cutoff); err != nil || n != 0 {
+			t.Fatalf("second run: want nothing left to do, got %d (err %v)", n, err)
+		}
+	})
+
+	t.Run("an order paid while the job runs is not cancelled", func(t *testing.T) {
+		o := guest(t)
+		backdate(t, o)
+
+		// The merchant's "mark as paid" holds the row lock: the job finds the order (it is
+		// still pending), then waits for the lock, and must see the new status once it gets it.
+		tx, err := f.pool.Begin(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if err := database.SetScope(f.ctx, tx, database.Scope{TenantID: f.shop}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(f.ctx, `SELECT 1 FROM orders WHERE id = $1 FOR UPDATE`, o.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		type result struct {
+			n   int
+			err error
+		}
+		done := make(chan result)
+		go func() {
+			n, err := f.orders.ExpireUnpaid(f.ctx, cutoff)
+			done <- result{n, err}
+		}()
+		time.Sleep(200 * time.Millisecond) // let the job find the order and block on the lock
+
+		if _, err := tx.Exec(f.ctx, `UPDATE orders SET status = 'paid', paid_at = now() WHERE id = $1`, o.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		if r := <-done; r.err != nil || r.n != 0 {
+			t.Fatalf("want nothing cancelled, got %d (err %v)", r.n, r.err)
+		}
+		if s := get(t, o).Status; s != order.StatusPaid {
+			t.Fatalf("want the order to stay paid, got %s", s)
+		}
+	})
 }

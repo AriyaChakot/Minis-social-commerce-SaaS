@@ -111,6 +111,8 @@ export type UpdateProductRequest = Partial<CreateProductRequest> & { status?: Pr
 
 export type OrderStatus = 'pending' | 'paid' | 'shipped' | 'completed' | 'cancelled'
 export type OrderChannel = 'manual' | 'line' | 'facebook' | 'instagram' | 'storefront'
+/** Who or what cancelled an order: a shop member, or the worker (unpaid storefront order). */
+export type CancelReason = 'merchant' | 'payment_timeout'
 
 export interface OrderItem {
   id: ID
@@ -140,6 +142,8 @@ export interface Order {
   shipped_at: Timestamp | null
   completed_at: Timestamp | null
   cancelled_at: Timestamp | null
+  /** Set exactly when status is 'cancelled'. */
+  cancel_reason: CancelReason | null
   created_at: Timestamp
   updated_at: Timestamp
   /** Present on a single order (GET /orders/:id, create, status change); absent in lists. */
@@ -193,6 +197,9 @@ export interface StorefrontOrder {
   shipped_at: Timestamp | null
   completed_at: Timestamp | null
   cancelled_at: Timestamp | null
+  /** Payment deadline while pending; after it the order is cancelled automatically. */
+  pay_by: Timestamp | null
+  cancel_reason: CancelReason | null
 }
 
 export interface PlaceOrderRequest {

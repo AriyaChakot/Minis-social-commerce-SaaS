@@ -17,14 +17,16 @@ COPY . .
 
 # CGO_ENABLED=0 -> pure static binary, no dependency on C libraries in the final image
 # -ldflags="-s -w" -> strip debug symbols to make the binary smaller
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
+# ./cmd/... builds every program under cmd/ (api and worker) into /out/, one binary each.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ ./cmd/...
 
 # ---------- Stage 2: runtime ----------
 # Distroless static: no shell, no package manager, only CA certs + tzdata + a non-root user.
 FROM gcr.io/distroless/static-debian13:nonroot
 
 WORKDIR /app
-COPY --from=build /out/api /app/api
+# One image, two programs: the API is the default; the worker service overrides the entrypoint.
+COPY --from=build /out/ /app/
 
 # Run as an unprivileged user (uid 65532) instead of root.
 USER nonroot:nonroot

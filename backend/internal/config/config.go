@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds every setting the app needs at startup.
@@ -13,6 +14,17 @@ type Config struct {
 	DatabaseURL string
 	MongoURI    string
 	MongoDB     string
+
+	// PaymentWindow: how long a storefront order may stay unpaid before the worker cancels it.
+	// The API needs it too, to show customers their payment deadline.
+	PaymentWindow time.Duration
+}
+
+// WorkerConfig holds the settings of the background worker (cmd/worker).
+type WorkerConfig struct {
+	DatabaseURL   string
+	Interval      time.Duration // how often the jobs run
+	PaymentWindow time.Duration
 }
 
 // Load reads settings from the environment.
@@ -40,7 +52,50 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: missing required env vars: %s", strings.Join(missing, ", "))
 	}
 
+	var err error
+	if cfg.PaymentWindow, err = paymentWindow(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// LoadWorker reads the worker's settings. It needs only PostgreSQL.
+func LoadWorker() (WorkerConfig, error) {
+	cfg := WorkerConfig{DatabaseURL: os.Getenv("DATABASE_URL")}
+	if cfg.DatabaseURL == "" {
+		return WorkerConfig{}, fmt.Errorf("config: missing required env vars: DATABASE_URL")
+	}
+
+	var err error
+	if cfg.Interval, err = getDuration("WORKER_INTERVAL", time.Minute, 5*time.Second); err != nil {
+		return WorkerConfig{}, err
+	}
+	if cfg.PaymentWindow, err = paymentWindow(); err != nil {
+		return WorkerConfig{}, err
+	}
+	return cfg, nil
+}
+
+// paymentWindow is shared by the API and the worker, so they always agree on the deadline.
+func paymentWindow() (time.Duration, error) {
+	return getDuration("ORDER_PAYMENT_WINDOW", 24*time.Hour, time.Minute)
+}
+
+// getDuration parses a Go duration such as "90s", "15m" or "24h". A typo or a value below min
+// is an error (fail fast), not a silent fallback to the default.
+func getDuration(key string, fallback, min time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q is not a duration (examples: 30s, 15m, 24h)", key, v)
+	}
+	if d < min {
+		return 0, fmt.Errorf("config: %s=%s is too short (minimum %s)", key, d, min)
+	}
+	return d, nil
 }
 
 // getEnv returns the value of key, or fallback when it is unset or empty.

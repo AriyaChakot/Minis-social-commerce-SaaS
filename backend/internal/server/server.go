@@ -58,7 +58,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	orderSvc := order.NewService(deps.Postgres)
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
-	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc))
+	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc, cfg.PaymentWindow))
 
 	api := r.Group("/api/v1")
 	{

@@ -114,6 +114,32 @@ func TestService(t *testing.T) {
 			t.Fatalf("want ErrNotMember, got %v", err)
 		}
 	})
+
+	t.Run("cleanup deletes expired sessions and keeps live ones", func(t *testing.T) {
+		var expiredID string
+		err := pool.QueryRow(ctx,
+			`INSERT INTO sessions (user_id, token_hash, created_at, expires_at)
+			 VALUES ($1, sha256($2::bytea), now() - interval '8 days', now() - interval '1 day')
+			 RETURNING id`,
+			reg.User.ID, "expired-"+sfx,
+		).Scan(&expiredID)
+		if err != nil {
+			t.Fatalf("insert expired session: %v", err)
+		}
+
+		n, err := svc.DeleteExpiredSessions(ctx)
+		if err != nil || n < 1 { // >= 1: other expired sessions in a shared database go too
+			t.Fatalf("want at least 1 deleted, got %d (err %v)", n, err)
+		}
+		var left int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE id = $1`, expiredID).Scan(&left)
+		if left != 0 {
+			t.Fatal("the expired session is still there")
+		}
+		if _, err := svc.Authenticate(ctx, reg.Session.Token); err != nil {
+			t.Fatalf("the live session must survive cleanup: %v", err)
+		}
+	})
 }
 
 // cleanup deletes the test user and shop; sessions and memberships go with them (ON DELETE CASCADE).
