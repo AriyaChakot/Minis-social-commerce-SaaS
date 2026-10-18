@@ -57,6 +57,14 @@ const state = reactive({
   items: [{ product_id: '', quantity: 1 }],
 })
 
+// Opened from the inbox ("สร้างออเดอร์จากแชทนี้"): start with that chat's customer and channel.
+const route = useRoute()
+if (typeof route.query.customer_name === 'string') {
+  state.customer_name = route.query.customer_name.slice(0, 200)
+}
+const fromChannel = channelOptions.find(o => o.value === route.query.channel)
+if (fromChannel) state.channel = fromChannel.value as Schema['channel']
+
 function addLine() {
   state.items.push({ product_id: '', quantity: 1 })
 }

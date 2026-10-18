@@ -18,10 +18,11 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (Go + PostgreSQL)
+    name: Backend (Go + PostgreSQL + MongoDB)
     runs-on: ubuntu-latest
 
-    # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres).
+    # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres),
+    # and MongoDB for the chat inbox tests.
     services:
       postgres:
         image: postgres:18-alpine
@@ -35,6 +36,18 @@ jobs:
           --health-cmd "pg_isready -U mscs -d mscs"
           --health-interval 5s
           --health-timeout 3s
+          --health-retries 10
+      mongo:
+        image: mongo:8.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: mscs
+          MONGO_INITDB_ROOT_PASSWORD: ci-mongo
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
           --health-retries 10
 
     env:
@@ -82,6 +95,7 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgres://mscs_app:ci-app@localhost:5432/mscs?sslmode=disable
+          MONGO_URI: mongodb://mscs:ci-mongo@localhost:27017/?authSource=admin
         run: go test -race -count=1 ./...
 
       - name: Build Docker image

@@ -16,6 +16,7 @@ import (
 	"mscs/internal/config"
 	"mscs/internal/database"
 	"mscs/internal/handler"
+	"mscs/internal/inbox"
 	"mscs/internal/order"
 	"mscs/internal/product"
 	"mscs/internal/ratelimit"
@@ -74,6 +75,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	orderSvc := order.NewService(deps.Postgres)
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
+	inboxH := handler.NewInboxHandler(inbox.NewService(deps.Postgres, inbox.NewStore(deps.Mongo.DB)))
 	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc, cfg.PaymentWindow))
 
 	api := r.Group("/api/v1")
@@ -91,6 +93,10 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		store.POST("/orders", handler.RateLimitByIP(guestOrderByIP), storeH.PlaceOrder)
 		store.GET("/orders/:token", limitReads, storeH.TrackOrder)
 
+		// Called by LINE's servers, not by a browser: authenticated by the body's HMAC signature.
+		// Not rate-limited per IP: LINE delivers for every shop from a few addresses.
+		api.POST("/webhooks/line/:channelID", inboxH.LINEWebhook)
+
 		// Routes for any logged-in user.
 		authed := api.Group("", handler.RequireAuth(authSvc))
 		authed.POST("/auth/logout", authH.Logout)
@@ -105,12 +111,17 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		shop.GET("/orders/:orderID", orderH.Get)
 		shop.POST("/orders", orderH.Create)
 		shop.POST("/orders/:orderID/status", orderH.Transition)
+		shop.GET("/conversations", inboxH.Conversations)
+		shop.GET("/conversations/:conversationID/messages", inboxH.Messages)
+		shop.POST("/conversations/:conversationID/read", inboxH.MarkRead)
+		shop.GET("/channels/line", inboxH.LINEChannel)
 
 		// Inside one shop, but only for roles that may change the catalog.
 		managers := shop.Group("", handler.RequireRole(tenant.RoleOwner, tenant.RoleAdmin))
 		managers.POST("/products", productH.Create)
 		managers.PATCH("/products/:productID", productH.Update)
 		managers.DELETE("/products/:productID", productH.Archive)
+		managers.PUT("/channels/line", inboxH.ConnectLINE)
 	}
 
 	return &http.Server{

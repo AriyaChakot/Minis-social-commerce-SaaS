@@ -13,6 +13,7 @@ import (
 
 	"mscs/internal/config"
 	"mscs/internal/database"
+	"mscs/internal/inbox"
 	"mscs/internal/server"
 )
 
@@ -48,6 +49,12 @@ func main() {
 		}
 	}()
 	log.Println("mongo connected")
+
+	// MongoDB has no migrations: collections appear on first write, indexes are created here.
+	// CreateMany is a no-op for indexes that already exist, so this is safe on every start.
+	if err := inbox.NewStore(mg.DB).EnsureIndexes(ctx); err != nil {
+		log.Fatal(err)
+	}
 
 	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg})
 

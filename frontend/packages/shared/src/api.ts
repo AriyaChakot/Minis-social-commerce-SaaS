@@ -223,3 +223,48 @@ export interface Page<T> {
   items: T[]
   next_cursor: ID | null
 }
+
+// ---- Chat inbox ---------------------------------------------------------------------
+// Messages customers send to the shop's LINE Official Account (stored in MongoDB).
+
+/** LINE message types; other providers may add more, so any string is accepted. */
+export type ChatMessageType = 'text' | 'sticker' | 'image' | 'video' | 'audio' | 'file' | 'location' | (string & {})
+
+export interface Conversation {
+  id: string
+  channel: 'line'
+  /** Empty until the customer's profile can be fetched from LINE. */
+  display_name: string
+  /** Last characters of the customer's LINE id, to tell nameless customers apart. */
+  customer_ref: string
+  last_message_at: Timestamp
+  last_message_type: ChatMessageType
+  last_message_text: string
+  unread_count: number
+  created_at: Timestamp
+}
+
+export interface ChatMessage {
+  id: string
+  conversation_id: string
+  direction: 'in' | 'out'
+  type: ChatMessageType
+  /** Empty for non-text messages. */
+  text: string
+  sent_at: Timestamp
+}
+
+export interface ConversationThread {
+  conversation: Conversation
+  messages: ChatMessage[]
+}
+
+/** A shop's LINE connection. The channel secret itself is never returned. */
+export interface LineChannel {
+  id: string
+  /** Append to the API's public base URL and paste into the LINE Developers console. */
+  webhook_path: string
+  secret_hint: string
+  created_at: Timestamp
+  updated_at: Timestamp
+}

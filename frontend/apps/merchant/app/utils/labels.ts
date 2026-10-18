@@ -1,4 +1,4 @@
-import type { OrderChannel, OrderStatus, ProductStatus, Role } from '@mscs/shared'
+import type { ChatMessageType, Conversation, OrderChannel, OrderStatus, ProductStatus, Role } from '@mscs/shared'
 
 // Thai labels and badge colors for API enum values (auto-imported in app/).
 // Record<Union, ...> makes TypeScript fail the build if a new enum value has no label.
@@ -41,4 +41,25 @@ export const CHANNEL_LABEL: Record<OrderChannel, string> = {
   facebook: 'Facebook',
   instagram: 'Instagram',
   storefront: 'หน้าร้านออนไลน์',
+}
+
+/** Placeholder text for chat messages that are not text (no media viewer yet). */
+const CHAT_TYPE_LABEL: Record<string, string> = {
+  sticker: 'ส่งสติกเกอร์',
+  image: 'ส่งรูปภาพ',
+  video: 'ส่งวิดีโอ',
+  audio: 'ส่งข้อความเสียง',
+  file: 'ส่งไฟล์',
+  location: 'ส่งตำแหน่งที่ตั้ง',
+}
+
+/** What to show for a message: its text, or a description of a non-text message. */
+export function chatSummary(type: ChatMessageType, text: string): string {
+  if (type === 'text') return text
+  return `[${CHAT_TYPE_LABEL[type] ?? 'ส่งข้อความประเภทอื่น'}]`
+}
+
+/** The customer's name, or a stable placeholder until LINE profiles are fetched. */
+export function conversationName(c: Conversation): string {
+  return c.display_name || `ลูกค้า LINE …${c.customer_ref}`
 }

@@ -1,7 +1,7 @@
 # Runs Go commands in Docker (Go is not installed on the host).
 #
 #   .\scripts\go.ps1 test ./...                    # unit tests only (DB tests skip)
-#   .\scripts\go.ps1 --db test -v ./internal/...   # with Postgres from docker compose (RLS applies)
+#   .\scripts\go.ps1 --db test -v ./internal/...   # with Postgres + MongoDB from docker compose (RLS applies)
 #   .\scripts\go.ps1 mod tidy
 #   .\scripts\go.ps1 vet ./...
 #
@@ -30,7 +30,8 @@ if ($goArgs.Count -gt 0 -and $goArgs[0] -eq '--db') {
     # Join the compose network and log in as the restricted app role, so RLS applies.
     # Passed by name only (-e DATABASE_URL), so the password never appears in the process list.
     $env:DATABASE_URL = "postgres://mscs_app:$($vars.APP_DB_PASSWORD)@postgres:5432/$($vars.POSTGRES_DB)?sslmode=disable"
-    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL')
+    $env:MONGO_URI = "mongodb://$($vars.MONGO_USER):$($vars.MONGO_PASSWORD)@mongo:27017/?authSource=admin"
+    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL', '-e', 'MONGO_URI')
 }
 
 try {
@@ -42,5 +43,5 @@ try {
     exit $LASTEXITCODE
 }
 finally {
-    Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:DATABASE_URL, Env:MONGO_URI -ErrorAction SilentlyContinue
 }

@@ -17,8 +17,9 @@ COPY . .
 
 # CGO_ENABLED=0 -> pure static binary, no dependency on C libraries in the final image
 # -ldflags="-s -w" -> strip debug symbols to make the binary smaller
-# ./cmd/... builds every program under cmd/ (api and worker) into /out/, one binary each.
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ ./cmd/...
+# Builds the two programs we deploy into /out/, one binary each. (cmd/linesim is a dev tool and
+# stays out of the image.)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ ./cmd/api ./cmd/worker
 
 # ---------- Stage 2: runtime ----------
 # Distroless static: no shell, no package manager, only CA certs + tzdata + a non-root user.

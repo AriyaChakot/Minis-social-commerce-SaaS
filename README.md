@@ -20,6 +20,8 @@ run against a real database.
 | ![Order detail](docs/screenshots/order-detail.png) | ![Products](docs/screenshots/products.png) |
 | **Storefront (customer)** | **Order tracking (customer)** |
 | ![Storefront](docs/screenshots/storefront-shop.png) | ![Order tracking](docs/screenshots/storefront-order.png) |
+| **Chat inbox (LINE)** | |
+| ![Chat inbox](docs/screenshots/inbox.png) | |
 
 *The UI is in Thai, the language of its target users.*
 
@@ -35,6 +37,8 @@ run against a real database.
 - **Merchant admin web app** — server-rendered Nuxt app with form validation, toasts, confirmation dialogs.
 - **Customer storefront** — SvelteKit app at `/s/<shop-slug>`: product grid, cart, guest checkout, and a private
   tracking page that shows the order's progress as the merchant updates it.
+- **Chat inbox** — connect the shop's LINE Official Account; customers' messages arrive by webhook and appear in
+  one inbox per shop (unread counts, live refresh), and a chat becomes an order in one click.
 - **Background worker** — cancels storefront orders left unpaid past a payment window (the stock goes back on sale;
   the customer sees the deadline and the reason), and deletes expired sessions. Runs safely with several replicas.
 
@@ -47,7 +51,8 @@ flowchart LR
     N -- "Bearer token<br/>/api/v1/..." --> G[Go API<br/>Gin]
     S -- "public endpoints<br/>/api/v1/public/..." --> G
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
-    G -. "health / future chat inbox" .-> M[(MongoDB 8)]
+    G -- "chat inbox<br/>conversations, messages" --> M[(MongoDB 8)]
+    L[LINE Platform] -- "webhook<br/>HMAC-signed" --> G
     MG[golang-migrate] -- "schema owner role" --> P
     W[Go worker<br/>leader-elected] -- "advisory lock + jobs<br/>role mscs_app" --> P
 ```
@@ -119,6 +124,16 @@ the frontends forward the browser's address in `X-Forwarded-For`, and the API tr
 configured `TRUSTED_PROXIES` (Gin trusts every proxy by default, which lets any client fake its IP). IPv6 clients are
 keyed by `/64`. Refusals are `429` with `Retry-After`. Buckets are in memory, so each API replica counts on its own.
 
+**A chat inbox on MongoDB, with the guarantees rebuilt in code.** Each database does what it is good at: the LINE
+connection (with its secret) lives in PostgreSQL, while conversations and messages — append-heavy, and shaped
+differently per provider (stickers, images…) — live in MongoDB, each message keeping the provider's raw event.
+Webhooks are authenticated by `X-Line-Signature` (HMAC-SHA256 over the exact raw body, compared in constant time)
+before anything in them is trusted. MongoDB has no RLS, so every store method takes the tenant id and puts it first
+in every filter and index (a test checks that another shop cannot read or mark a conversation). LINE may deliver a
+webhook twice: a unique index on the provider's message id makes the second delivery a no-op, and because there are
+no transactions on a standalone MongoDB, writes are ordered so a crash can only undercount unread messages, never
+double count them. A dev tool (`cmd/linesim`) sends correctly signed webhooks, since LINE cannot reach localhost.
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -149,10 +164,18 @@ pnpm dev:storefront
 Open http://localhost:3000, sign up, add a few products and create an order. Then open
 `http://localhost:5173/s/<your-shop-slug>` to shop as a customer — the order appears in the merchant app.
 
+To try the chat inbox without a LINE account: on the shop's **Settings** page, save any 32-character hex secret
+(e.g. `openssl rand -hex 16`), then send a demo conversation with the simulator:
+
+```powershell
+.\scripts\go.ps1 --db run ./cmd/linesim -channel <channel id from the webhook URL> -secret <that secret>
+```
+
 ## Tests
 
-The integration tests need the database from `docker compose` and connect as the restricted role,
-so Row-Level Security is part of what they test. Without `DATABASE_URL` they are skipped.
+The integration tests need the databases from `docker compose` and connect to PostgreSQL as the restricted role,
+so Row-Level Security is part of what they test; each MongoDB test gets its own throwaway database. Without
+`DATABASE_URL` / `MONGO_URI` they are skipped.
 
 ```powershell
 # Windows (PowerShell) helper: runs Go inside Docker
@@ -164,6 +187,7 @@ so Row-Level Security is part of what they test. Without `DATABASE_URL` they are
 # Any OS, plain Docker (replace <APP_DB_PASSWORD> with the value from .env)
 docker run --rm --network mscs_default -v "$PWD/backend:/src" -w /src \
   -e DATABASE_URL="postgres://mscs_app:<APP_DB_PASSWORD>@postgres:5432/mscs?sslmode=disable" \
+  -e MONGO_URI="mongodb://mscs:<MONGO_PASSWORD>@mongo:27017/?authSource=admin" \
   golang:1.26 go test -race ./...
 ```
 
@@ -172,7 +196,7 @@ cd frontend && pnpm typecheck
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs gofmt, `go vet`, the full test suite with
-`-race` against PostgreSQL 18, the Docker image build, and the typecheck (`vue-tsc`, `svelte-check`) and
+`-race` against PostgreSQL 18 and MongoDB 8, the Docker image build, and the typecheck (`vue-tsc`, `svelte-check`) and
 production build of both frontends.
 
 ## API overview
@@ -191,6 +215,11 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `GET` `POST` | `/tenants/:tenantID/orders` | List (status, search, cursor) / create |
 | `GET` | `/tenants/:tenantID/orders/:orderID` | Order with its lines |
 | `POST` | `/tenants/:tenantID/orders/:orderID/status` | Move along the state machine |
+| `GET` | `/tenants/:tenantID/conversations` | Chat inbox: latest conversations |
+| `GET` | `/tenants/:tenantID/conversations/:id/messages` | A conversation's messages |
+| `POST` | `/tenants/:tenantID/conversations/:id/read` | Mark as read |
+| `GET` `PUT` | `/tenants/:tenantID/channels/line` | LINE connection (secret is write-only; `PUT` for owner/admin) |
+| `POST` | `/webhooks/line/:channelID` | LINE webhook (authenticated by its signature) |
 
 **Public storefront API** (no login; `:slug` selects an active shop):
 
@@ -209,6 +238,7 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 backend/
   cmd/api/              API entry point: config, DB connections, graceful shutdown
   cmd/worker/           background worker entry point
+  cmd/linesim/          dev tool: sends signed LINE webhooks
   internal/
     auth/               passwords (Argon2id), sessions, auth use cases
     tenant/ user/       shops, memberships, users
@@ -216,6 +246,7 @@ backend/
     storefront/         public, customer-facing use cases and view types
     securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
     leader/ worker/     leader election (advisory lock), periodic jobs
+    inbox/              chat inbox: LINE webhooks, conversations and messages (MongoDB)
     database/           pool, RLS-scoped transactions (InTx), shared helpers
     handler/ server/    HTTP handlers, middleware, routes
   migrations/           SQL migrations (golang-migrate)
@@ -230,7 +261,8 @@ scripts/                developer helpers
 ## Roadmap
 
 - [x] Customer storefront and guest checkout (SvelteKit)
-- [ ] Chat inbox for LINE / Facebook messages (MongoDB, webhooks)
+- [x] Chat inbox for LINE messages (MongoDB, signed webhooks)
+- [ ] Reply from the inbox and show customers' LINE names (LINE Messaging API); Facebook / Instagram
 - [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
 - [x] Rate limiting on login, registration and the public storefront API
 - [ ] Platform admin console (React)

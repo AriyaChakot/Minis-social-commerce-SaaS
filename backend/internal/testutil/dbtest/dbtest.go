@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Pool connects to DATABASE_URL (which must use the restricted app role, so RLS applies)
@@ -30,6 +32,29 @@ func Pool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// Mongo connects to MONGO_URI and returns a fresh database just for this test (dropped when the
+// test ends), so tests never see each other's documents or the dev data. Without MONGO_URI the
+// test is skipped.
+func Mongo(t *testing.T) *mongo.Database {
+	t.Helper()
+	uri := os.Getenv("MONGO_URI")
+	if uri == "" {
+		t.Skip("MONGO_URI not set; skipping integration test")
+	}
+
+	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatalf("dbtest: mongo connect: %v", err)
+	}
+	db := client.Database("mscs_test_" + Suffix())
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_ = db.Drop(ctx)
+		_ = client.Disconnect(ctx)
+	})
+	return db
 }
 
 // Suffix returns a short random string to keep unique columns (slug, email) unique across runs.

@@ -12,3 +12,13 @@ const dateTime = new Intl.DateTimeFormat('th-TH', {
 export function formatDateTime(ts: Timestamp): string {
   return dateTime.format(new Date(ts))
 }
+
+const timeOnly = new Intl.DateTimeFormat('th-TH', { timeStyle: 'short', timeZone: 'Asia/Bangkok' })
+const dayMonth = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' })
+const bangkokDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }) // "2026-10-15"
+
+/** Short time for lists, like chat apps: "13:18" today, "14 ต.ค." on earlier days (Bangkok time). */
+export function formatShortTime(ts: Timestamp, now: Date = new Date()): string {
+  const d = new Date(ts)
+  return bangkokDay.format(d) === bangkokDay.format(now) ? timeOnly.format(d) : dayMonth.format(d)
+}

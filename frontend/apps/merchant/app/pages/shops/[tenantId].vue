@@ -25,16 +25,20 @@ provideShop(shop)
 
 useHead({ titleTemplate: t => (t ? `${t} · ${shop.value.tenant.name}` : shop.value.tenant.name) })
 
+const SECTIONS = [
+  { path: 'orders', label: 'ออเดอร์', icon: 'i-lucide-receipt' },
+  { path: 'inbox', label: 'แชท', icon: 'i-lucide-message-circle' },
+  { path: 'products', label: 'สินค้า', icon: 'i-lucide-package' },
+  { path: 'settings', label: 'ตั้งค่า', icon: 'i-lucide-settings', managersOnly: true },
+]
+
 // `active` by path prefix, so "ออเดอร์" stays highlighted on /orders/new and /orders/:id too.
-const tabs = computed(() => ['orders', 'products'].map((section) => {
-  const to = `/shops/${tenantId.value}/${section}`
-  return {
-    label: section === 'orders' ? 'ออเดอร์' : 'สินค้า',
-    icon: section === 'orders' ? 'i-lucide-receipt' : 'i-lucide-package',
-    to,
-    active: route.path.startsWith(to),
-  }
-}))
+const tabs = computed(() => SECTIONS
+  .filter(s => !s.managersOnly || shop.value.canManage)
+  .map((s) => {
+    const to = `/shops/${tenantId.value}/${s.path}`
+    return { label: s.label, icon: s.icon, to, active: route.path.startsWith(to) }
+  }))
 </script>
 
 <template>
