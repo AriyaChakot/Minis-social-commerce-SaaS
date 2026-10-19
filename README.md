@@ -171,6 +171,19 @@ To try the chat inbox without a LINE account: on the shop's **Settings** page, s
 .\scripts\go.ps1 --db run ./cmd/linesim -channel <channel id from the webhook URL> -secret <that secret>
 ```
 
+To connect a real LINE Official Account, the API needs a public HTTPS URL. A Cloudflare quick tunnel (no account)
+gives one; it exposes the whole API, so stop it when you are done:
+
+```powershell
+docker compose --profile tunnel up -d tunnel
+docker compose logs tunnel          # copy the https://….trycloudflare.com URL
+# frontend/apps/merchant/.env  →  NUXT_PUBLIC_WEBHOOK_BASE_URL=https://….trycloudflare.com  (restart nuxt dev)
+docker compose stop tunnel          # when done
+```
+
+Then follow the three steps on the shop's **Settings** page with the channel secret and webhook URL from the
+LINE Developers Console, and send the account a message from your phone.
+
 ## Tests
 
 The integration tests need the databases from `docker compose` and connect to PostgreSQL as the restricted role,

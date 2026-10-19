@@ -94,6 +94,17 @@ services:
       postgres:
         condition: service_healthy
 
+  # Dev only: a public HTTPS URL for the API, so a real LINE Official Account can send webhooks
+  # to this machine (LINE cannot reach localhost). Cloudflare "quick tunnel": no account needed,
+  # the URL is random and changes on every start. It exposes the whole API, so stop it when done.
+  # Usage: docker compose --profile tunnel up -d tunnel; docker compose logs tunnel  (find *.trycloudflare.com)
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://api:8080"]
+    depends_on:
+      - api
+
 # Named volumes: data survives `docker compose down` (removed only with `down -v`).
 volumes:
   pgdata:
