@@ -1,6 +1,8 @@
 # --- Secrets / local env ---
 .env
 .env.*
+# Personal local notes (may contain dev passwords)
+*.local.md
 !.env.example
 
 # --- Go ---
