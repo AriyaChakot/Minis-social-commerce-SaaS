@@ -25,7 +25,7 @@ const ProviderLINE = "line"
 // Direction of a message, seen from the shop.
 const (
 	DirectionIn  = "in"  // customer -> shop
-	DirectionOut = "out" // shop -> customer (replies, next step)
+	DirectionOut = "out" // shop -> customer (replies from the inbox)
 )
 
 // Conversation is one customer's chat with one shop on one provider.
@@ -35,8 +35,9 @@ type Conversation struct {
 	Channel  string        `bson:"channel" json:"channel"`
 	// The provider's id for the customer (LINE userId). Not shown to the merchant.
 	ExternalUserID string `bson:"external_user_id" json:"-"`
-	// Empty until we can ask the provider for the profile (needs the access token, next step).
+	// From the provider's profile; empty until it could be fetched (needs the access token).
 	DisplayName string `bson:"display_name" json:"display_name"`
+	PictureURL  string `bson:"picture_url,omitempty" json:"picture_url"`
 	// Short, stable reference to tell nameless customers apart ("…a1b2c3").
 	CustomerRef     string    `bson:"customer_ref" json:"customer_ref"`
 	LastMessageAt   time.Time `bson:"last_message_at" json:"last_message_at"`
@@ -59,6 +60,8 @@ type Message struct {
 	Text       string    `bson:"text" json:"text"` // empty for non-text messages
 	SentAt     time.Time `bson:"sent_at" json:"sent_at"`
 	ReceivedAt time.Time `bson:"received_at" json:"-"`
+	// SentBy: the user who replied (outgoing messages only), for the record.
+	SentBy string `bson:"sent_by,omitempty" json:"-"`
 	// The provider's event exactly as received. Nothing reads it yet; it keeps every detail
 	// (sticker ids, image ids...) for later features without a schema change.
 	Raw bson.Raw `bson:"raw,omitempty" json:"-"`
@@ -69,8 +72,12 @@ type LineChannel struct {
 	ID          uuid.UUID `json:"id"`
 	WebhookPath string    `json:"webhook_path"`
 	SecretHint  string    `json:"secret_hint"` // last 4 characters, to recognise which secret is set
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// CanReply: an access token is saved, so the inbox can reply and show customers' names.
+	CanReply   bool      `json:"can_reply"`
+	BotName    string    `json:"bot_name"`     // the Official Account the token belongs to
+	BotBasicID string    `json:"bot_basic_id"` // e.g. "@123abcde"
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 var (
@@ -78,6 +85,15 @@ var (
 	ErrBadSignature         = errors.New("inbox: webhook signature does not match")
 	ErrBadPayload           = errors.New("inbox: webhook body is not a valid LINE payload")
 	ErrConversationNotFound = errors.New("inbox: conversation not found")
+
+	// Replying needs the shop's channel access token.
+	ErrRepliesNotEnabled = errors.New("inbox: replies need a LINE channel access token")
+	// LINE refused the saved token (revoked or reissued): the merchant must save a new one.
+	ErrLineTokenRejected = errors.New("inbox: LINE rejected the access token")
+	// The account's monthly message quota is used up, or too many requests.
+	ErrLineRateLimited = errors.New("inbox: LINE rate limit or monthly quota reached")
+	// LINE could not be reached or failed; trying again later may work.
+	ErrLineUnavailable = errors.New("inbox: LINE is unavailable")
 )
 
 type ValidationError struct {

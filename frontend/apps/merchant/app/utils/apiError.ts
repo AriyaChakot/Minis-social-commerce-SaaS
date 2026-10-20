@@ -13,6 +13,11 @@ const MESSAGES: Record<string, string> = {
   validation_failed: 'ข้อมูลบางช่องไม่ถูกต้อง',
   internal_error: 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง',
   rate_limited: 'ทำรายการถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
+  conversation_not_found: 'ไม่พบแชทนี้',
+  replies_not_enabled: 'ยังตอบแชทไม่ได้ ให้เจ้าของร้านใส่ Channel access token ในหน้าตั้งค่าก่อน',
+  line_token_rejected: 'LINE ไม่ยอมรับ access token ที่บันทึกไว้ (อาจถูกออกใหม่) ให้บันทึก token ใหม่ในหน้าตั้งค่า',
+  line_rate_limited: 'ส่งไม่ได้: ใช้โควตาข้อความของ LINE เดือนนี้หมดแล้ว หรือส่งถี่เกินไป',
+  line_unavailable: 'ติดต่อ LINE ไม่ได้ชั่วคราว กรุณาลองส่งอีกครั้ง',
 }
 
 /** The API's {error: {...}} body inside a $fetch error, or null for other failures. */

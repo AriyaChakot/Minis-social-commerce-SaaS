@@ -32,6 +32,8 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 type Deps struct {
 	Postgres *pgxpool.Pool
 	Mongo    *database.Mongo
+	// Inbox is built in main, which also runs its startup tasks (indexes, secret encryption).
+	Inbox *inbox.Service
 }
 
 // New returns an *http.Server that is configured but not started yet.
@@ -75,7 +77,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	orderSvc := order.NewService(deps.Postgres)
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
-	inboxH := handler.NewInboxHandler(inbox.NewService(deps.Postgres, inbox.NewStore(deps.Mongo.DB)))
+	inboxH := handler.NewInboxHandler(deps.Inbox)
 	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc, cfg.PaymentWindow))
 
 	api := r.Group("/api/v1")
@@ -113,6 +115,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		shop.POST("/orders/:orderID/status", orderH.Transition)
 		shop.GET("/conversations", inboxH.Conversations)
 		shop.GET("/conversations/:conversationID/messages", inboxH.Messages)
+		shop.POST("/conversations/:conversationID/messages", inboxH.Reply)
 		shop.POST("/conversations/:conversationID/read", inboxH.MarkRead)
 		shop.GET("/channels/line", inboxH.LINEChannel)
 

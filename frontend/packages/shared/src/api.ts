@@ -233,8 +233,10 @@ export type ChatMessageType = 'text' | 'sticker' | 'image' | 'video' | 'audio' |
 export interface Conversation {
   id: string
   channel: 'line'
-  /** Empty until the customer's profile can be fetched from LINE. */
+  /** From the customer's LINE profile; empty until it can be fetched (needs the access token). */
   display_name: string
+  /** Profile picture URL on LINE's servers; empty when unknown. */
+  picture_url: string
   /** Last characters of the customer's LINE id, to tell nameless customers apart. */
   customer_ref: string
   last_message_at: Timestamp
@@ -265,6 +267,11 @@ export interface LineChannel {
   /** Append to the API's public base URL and paste into the LINE Developers console. */
   webhook_path: string
   secret_hint: string
+  /** An access token is saved: the inbox can reply and show customers' names. */
+  can_reply: boolean
+  /** The Official Account the token belongs to. */
+  bot_name: string
+  bot_basic_id: string
   created_at: Timestamp
   updated_at: Timestamp
 }

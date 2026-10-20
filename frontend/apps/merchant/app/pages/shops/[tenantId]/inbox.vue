@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { Conversation, ConversationThread, LineChannel } from '@mscs/shared'
+import type { ChatMessage, Conversation, ConversationThread, LineChannel } from '@mscs/shared'
 import { formatDateTime, formatShortTime } from '@mscs/shared'
 
 useHead({ title: 'แชท' })
 
 const shop = useShop()
+const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 
@@ -21,7 +22,7 @@ const { data: list, refresh: refreshList } = await useFetch<{ items: Conversatio
 })
 const conversations = computed(() => list.value?.items ?? [])
 
-// Only to explain an empty inbox: "connect LINE first" vs "no messages yet".
+// Explains an empty inbox ("connect LINE first" vs "no messages yet") and whether replies work.
 const { data: channel } = await useFetch<{ line: LineChannel | null }>(() => `${base.value}/channels/line`, {
   key: () => `line-channel-${shop.value.id}`,
 })
@@ -54,6 +55,46 @@ watch(() => thread.value?.messages.length, async () => {
   await nextTick()
   scroller.value?.scrollTo({ top: scroller.value.scrollHeight })
 }, { immediate: true })
+
+// --- Reply box ---
+const canReply = computed(() => channel.value?.line?.can_reply ?? false)
+const draft = ref('')
+const sending = ref(false)
+// One id per message, made in the browser: if the answer to a send gets lost and the merchant
+// presses send again, the API recognises the id and LINE does not deliver the message twice.
+// A new id once the text changes (it is then another message) or after a successful send.
+const clientId = ref(crypto.randomUUID())
+watch(draft, () => (clientId.value = crypto.randomUUID()))
+watch(selectedId, () => (draft.value = ''))
+
+async function send() {
+  const text = draft.value.trim()
+  if (!text || sending.value || !selectedId.value) return
+  sending.value = true
+  try {
+    await $fetch<{ message: ChatMessage }>(`${base.value}/conversations/${selectedId.value}/messages`, {
+      method: 'POST',
+      body: { text, client_id: clientId.value },
+    })
+    draft.value = ''
+    await Promise.all([refreshThread(), refreshList()])
+  }
+  catch (e) {
+    toast.add({ title: apiErrorMessage(e), color: 'error' })
+  }
+  finally {
+    sending.value = false
+  }
+}
+
+// Enter sends, Shift+Enter starts a new line. isComposing: Enter that confirms an input-method
+// candidate (e.g. some Thai or Japanese keyboards) must not send a half-typed message.
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault()
+    send()
+  }
+}
 
 // "Create order from this chat": the order form opens with the customer and channel filled in.
 const orderLink = computed(() => {
@@ -90,8 +131,8 @@ const orderLink = computed(() => {
             :class="c.id === selectedId ? 'bg-elevated' : ''"
             @click="open(c.id)"
           >
-            <!-- An icon, not initials: placeholder names ("ลูกค้า LINE …") would all look alike. -->
-            <UAvatar icon="i-lucide-user" size="md" class="shrink-0 bg-green-500/15 text-green-700" />
+            <!-- The LINE picture when known; otherwise an icon, not initials ("ลูกค้า LINE …" would all look alike). -->
+            <UAvatar :src="c.picture_url || undefined" icon="i-lucide-user" size="md" class="shrink-0 bg-green-500/15 text-green-700" />
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline justify-between gap-2">
                 <p class="truncate" :class="c.unread_count ? 'font-semibold' : 'font-medium'">
@@ -117,6 +158,7 @@ const orderLink = computed(() => {
         <div class="flex items-center justify-between gap-2">
           <div class="flex min-w-0 items-center gap-2">
             <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" class="md:hidden" aria-label="กลับไปรายการแชท" @click="open(null)" />
+            <UAvatar v-if="thread" :src="thread.conversation.picture_url || undefined" icon="i-lucide-user" size="sm" class="shrink-0 bg-green-500/15 text-green-700" />
             <p class="truncate font-semibold">
               {{ thread ? conversationName(thread.conversation) : '…' }}
             </p>
@@ -147,14 +189,32 @@ const orderLink = computed(() => {
             <p class="whitespace-pre-line break-words" :class="m.type === 'text' ? '' : 'italic text-muted'">
               {{ chatSummary(m.type, m.text) }}
             </p>
-            <p class="mt-0.5 text-right text-[11px] text-muted">
+            <p class="mt-0.5 text-right text-[11px]" :class="m.direction === 'out' ? 'text-inverted/80' : 'text-muted'">
               {{ formatDateTime(m.sent_at) }}
             </p>
           </div>
         </div>
       </div>
-      <p class="border-t border-default px-4 py-2 text-xs text-muted">
-        ตอบกลับลูกค้าในแอป LINE Official Account ได้ตามปกติ (การตอบจากหน้านี้จะตามมาในเวอร์ชันถัดไป)
+      <form v-if="canReply && !threadError" class="flex items-end gap-2 border-t border-default p-3" @submit.prevent="send">
+        <UTextarea
+          v-model="draft"
+          :rows="1"
+          autoresize
+          :maxrows="6"
+          :maxlength="5000"
+          placeholder="พิมพ์ตอบลูกค้า…"
+          title="Enter เพื่อส่ง · Shift+Enter ขึ้นบรรทัดใหม่"
+          aria-label="ข้อความตอบลูกค้า"
+          class="flex-1"
+          @keydown="onKeydown"
+        />
+        <UButton type="submit" icon="i-lucide-send" :loading="sending" :disabled="!draft.trim()" aria-label="ส่ง" />
+      </form>
+      <p v-else-if="!threadError" class="border-t border-default px-4 py-2 text-xs text-muted">
+        ยังตอบจากหน้านี้ไม่ได้ ตอบในแอป LINE Official Account ไปก่อน
+        <template v-if="shop.canManage">
+          หรือ <NuxtLink :to="`/shops/${shop.id}/settings`" class="text-primary underline">ใส่ Channel access token</NuxtLink> เพื่อเปิดการตอบแชท
+        </template>
       </p>
     </UCard>
 

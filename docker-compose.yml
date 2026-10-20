@@ -19,6 +19,9 @@ services:
       # gateway (172.x.0.1), so that range may forward the real client IP. In production, list
       # only the frontend servers' addresses.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+      # Encrypts the LINE credentials stored in PostgreSQL. Required; keep it secret and keep a copy:
+      # without it, the saved credentials cannot be read anymore.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY}
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:

@@ -49,6 +49,7 @@ func TestTrustedProxies(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("MONGO_URI", "mongodb://example")
 	t.Setenv("MONGO_DB", "mscs")
+	t.Setenv("DATA_ENCRYPTION_KEY", testKey)
 
 	t.Setenv("TRUSTED_PROXIES", " 172.16.0.0/12, 10.0.0.5 ,")
 	cfg, err := Load()
@@ -67,5 +68,28 @@ func TestTrustedProxies(t *testing.T) {
 	t.Setenv("TRUSTED_PROXIES", "")
 	if cfg, err := Load(); err != nil || cfg.TrustedProxies != nil {
 		t.Fatalf("unset: want no trusted proxies, got %q (err %v)", cfg.TrustedProxies, err)
+	}
+}
+
+// testKey is 32 zero bytes, base64-encoded.
+const testKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+func TestDataEncryptionKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("MONGO_URI", "mongodb://example")
+	t.Setenv("MONGO_DB", "mscs")
+
+	t.Setenv("DATA_ENCRYPTION_KEY", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DATA_ENCRYPTION_KEY") {
+		t.Fatalf("missing key: want an error naming it, got %v", err)
+	}
+	t.Setenv("DATA_ENCRYPTION_KEY", "c2hvcnQ=") // "short": valid base64, wrong length
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "32 bytes") {
+		t.Fatalf("short key: want a length error, got %v", err)
+	}
+	t.Setenv("DATA_ENCRYPTION_KEY", testKey)
+	cfg, err := Load()
+	if err != nil || len(cfg.DataEncryptionKey) != 32 || cfg.LineAPIBaseURL != "https://api.line.me" {
+		t.Fatalf("got %d-byte key, base %q, err %v", len(cfg.DataEncryptionKey), cfg.LineAPIBaseURL, err)
 	}
 }

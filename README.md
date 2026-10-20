@@ -38,7 +38,8 @@ run against a real database.
 - **Customer storefront** — SvelteKit app at `/s/<shop-slug>`: product grid, cart, guest checkout, and a private
   tracking page that shows the order's progress as the merchant updates it.
 - **Chat inbox** — connect the shop's LINE Official Account; customers' messages arrive by webhook and appear in
-  one inbox per shop (unread counts, live refresh), and a chat becomes an order in one click.
+  one inbox per shop (unread counts, live refresh, customers' LINE names and pictures). Reply from the inbox, and
+  turn a chat into an order in one click.
 - **Background worker** — cancels storefront orders left unpaid past a payment window (the stock goes back on sale;
   the customer sees the deadline and the reason), and deletes expired sessions. Runs safely with several replicas.
 
@@ -53,6 +54,7 @@ flowchart LR
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
     G -- "chat inbox<br/>conversations, messages" --> M[(MongoDB 8)]
     L[LINE Platform] -- "webhook<br/>HMAC-signed" --> G
+    G -- "replies, profiles<br/>Messaging API" --> L
     MG[golang-migrate] -- "schema owner role" --> P
     W[Go worker<br/>leader-elected] -- "advisory lock + jobs<br/>role mscs_app" --> P
 ```
@@ -134,6 +136,14 @@ webhook twice: a unique index on the provider's message id makes the second deli
 no transactions on a standalone MongoDB, writes are ordered so a crash can only undercount unread messages, never
 double count them. A dev tool (`cmd/linesim`) sends correctly signed webhooks, since LINE cannot reach localhost.
 
+**Calling LINE back: credentials encrypted, sends that cannot duplicate.** The channel secret and access token are
+encrypted with AES-256-GCM before they reach PostgreSQL (key in `DATA_ENCRYPTION_KEY`, never in the database), with
+the row and column as associated data so a ciphertext copied elsewhere does not decrypt. Secrets saved before
+encryption existed are converted at startup (expand → migrate → contract). The LINE client has timeouts and retries
+transient failures with backoff; a reply carries a browser-made id that is both LINE's `X-Line-Retry-Key` and the
+message's unique key, so a double click or a retry after a lost answer sends the message once. Tokens are checked
+with LINE before they are saved; customers' names are fetched best-effort, never slowing the webhook down.
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -143,7 +153,8 @@ not a member of, graceful shutdown, liveness vs readiness probes, request body s
 **Prerequisites:** Docker Desktop, Node.js ≥ 22.19, pnpm 10. Go is *not* required locally (it runs in Docker).
 
 ```bash
-# 1. Configuration: copy the example and change every password
+# 1. Configuration: copy the example, change every password, and set DATA_ENCRYPTION_KEY
+#    to the output of `openssl rand -base64 32`
 cp .env.example .env
 
 # 2. Start PostgreSQL, MongoDB, the Go API (http://localhost:8080) and the background worker
@@ -230,8 +241,9 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `POST` | `/tenants/:tenantID/orders/:orderID/status` | Move along the state machine |
 | `GET` | `/tenants/:tenantID/conversations` | Chat inbox: latest conversations |
 | `GET` | `/tenants/:tenantID/conversations/:id/messages` | A conversation's messages |
+| `POST` | `/tenants/:tenantID/conversations/:id/messages` | Reply to the customer through LINE (`text`, `client_id`) |
 | `POST` | `/tenants/:tenantID/conversations/:id/read` | Mark as read |
-| `GET` `PUT` | `/tenants/:tenantID/channels/line` | LINE connection (secret is write-only; `PUT` for owner/admin) |
+| `GET` `PUT` | `/tenants/:tenantID/channels/line` | LINE connection: channel secret and access token, both write-only (`PUT` for owner/admin) |
 | `POST` | `/webhooks/line/:channelID` | LINE webhook (authenticated by its signature) |
 
 **Public storefront API** (no login; `:slug` selects an active shop):
@@ -259,7 +271,9 @@ backend/
     storefront/         public, customer-facing use cases and view types
     securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
     leader/ worker/     leader election (advisory lock), periodic jobs
-    inbox/              chat inbox: LINE webhooks, conversations and messages (MongoDB)
+    inbox/              chat inbox: LINE webhooks, conversations, messages (MongoDB), replies
+    lineapi/            LINE Messaging API client (timeouts, retries, retry keys)
+    secretbox/          AES-256-GCM encryption of stored credentials
     database/           pool, RLS-scoped transactions (InTx), shared helpers
     handler/ server/    HTTP handlers, middleware, routes
   migrations/           SQL migrations (golang-migrate)
@@ -275,7 +289,8 @@ scripts/                developer helpers
 
 - [x] Customer storefront and guest checkout (SvelteKit)
 - [x] Chat inbox for LINE messages (MongoDB, signed webhooks)
-- [ ] Reply from the inbox and show customers' LINE names (LINE Messaging API); Facebook / Instagram
+- [x] Reply from the inbox and show customers' LINE names (LINE Messaging API, encrypted credentials)
+- [ ] Facebook / Instagram messages; images and stickers in the inbox
 - [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
 - [x] Rate limiting on login, registration and the public storefront API
 - [ ] Platform admin console (React)

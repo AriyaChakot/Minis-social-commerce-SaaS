@@ -14,6 +14,8 @@ import (
 	"mscs/internal/config"
 	"mscs/internal/database"
 	"mscs/internal/inbox"
+	"mscs/internal/lineapi"
+	"mscs/internal/secretbox"
 	"mscs/internal/server"
 )
 
@@ -50,13 +52,26 @@ func main() {
 	}()
 	log.Println("mongo connected")
 
-	// MongoDB has no migrations: collections appear on first write, indexes are created here.
-	// CreateMany is a no-op for indexes that already exist, so this is safe on every start.
-	if err := inbox.NewStore(mg.DB).EnsureIndexes(ctx); err != nil {
+	box, err := secretbox.New(cfg.DataEncryptionKey)
+	if err != nil {
 		log.Fatal(err)
 	}
+	store := inbox.NewStore(mg.DB)
+	inboxSvc := inbox.NewService(pg, store, box, lineapi.New(cfg.LineAPIBaseURL))
 
-	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg})
+	// MongoDB has no migrations: collections appear on first write, indexes are created here.
+	// CreateMany is a no-op for indexes that already exist, so this is safe on every start.
+	if err := store.EnsureIndexes(ctx); err != nil {
+		log.Fatal(err)
+	}
+	// Secrets saved before encryption existed (migration 000012) are encrypted now; a no-op later.
+	if n, err := inboxSvc.EncryptLegacySecrets(ctx); err != nil {
+		log.Fatal(err)
+	} else if n > 0 {
+		log.Printf("inbox: encrypted %d LINE channel secret(s) stored in plaintext", n)
+	}
+
+	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg, Inbox: inboxSvc})
 
 	// ListenAndServe blocks forever, so run it in a goroutine and keep main free to wait for the signal.
 	go func() {

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"mscs/internal/secretbox"
 )
 
 // Config holds every setting the app needs at startup.
@@ -23,6 +25,14 @@ type Config struct {
 	// TrustedProxies: addresses or CIDR ranges of the servers allowed to tell the API the real
 	// client IP (X-Forwarded-For): our Nuxt and SvelteKit servers. Empty = trust nobody.
 	TrustedProxies []string
+
+	// DataEncryptionKey encrypts credentials stored in the database (LINE secrets and tokens).
+	// 32 bytes, given base64-encoded in DATA_ENCRYPTION_KEY. Losing it means those credentials
+	// cannot be read anymore (shops must enter them again); leaking it undoes the encryption.
+	DataEncryptionKey []byte
+
+	// LineAPIBaseURL: where LINE's Messaging API is. Only changed to point at a fake in tests.
+	LineAPIBaseURL string
 }
 
 // WorkerConfig holds the settings of the background worker (cmd/worker).
@@ -41,7 +51,10 @@ func Load() (Config, error) {
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		MongoURI:    os.Getenv("MONGO_URI"),
 		MongoDB:     os.Getenv("MONGO_DB"),
+		// The literal, not lineapi.DefaultBaseURL: config stays free of feature packages.
+		LineAPIBaseURL: getEnv("LINE_API_BASE_URL", "https://api.line.me"),
 	}
+	key := os.Getenv("DATA_ENCRYPTION_KEY")
 
 	var missing []string
 	if cfg.DatabaseURL == "" {
@@ -53,11 +66,17 @@ func Load() (Config, error) {
 	if cfg.MongoDB == "" {
 		missing = append(missing, "MONGO_DB")
 	}
+	if key == "" {
+		missing = append(missing, "DATA_ENCRYPTION_KEY")
+	}
 	if len(missing) > 0 {
 		return Config{}, fmt.Errorf("config: missing required env vars: %s", strings.Join(missing, ", "))
 	}
 
 	var err error
+	if cfg.DataEncryptionKey, err = secretbox.ParseKey(key); err != nil {
+		return Config{}, fmt.Errorf("config: DATA_ENCRYPTION_KEY: %w", err)
+	}
 	if cfg.PaymentWindow, err = paymentWindow(); err != nil {
 		return Config{}, err
 	}

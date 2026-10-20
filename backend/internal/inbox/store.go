@@ -129,6 +129,62 @@ func (s *Store) addIncoming(ctx context.Context, conv Conversation, in incoming,
 	return true, nil
 }
 
+// addOutgoing stores a reply the shop sent. msg.ExternalID is derived from the client's id for
+// the message, so a double submit finds the first one: it is returned with false, unchanged.
+// A reply also means the merchant has read the conversation.
+func (s *Store) addOutgoing(ctx context.Context, conv Conversation, msg Message) (Message, bool, error) {
+	if _, err := s.messages.InsertOne(ctx, msg); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			existing, err := s.messageByExternalID(ctx, conv.TenantID, conv.Channel, msg.ExternalID)
+			return existing, false, err
+		}
+		return Message{}, false, fmt.Errorf("inbox: insert reply: %w", err)
+	}
+
+	byID := bson.D{{Key: "tenant_id", Value: conv.TenantID}, {Key: "_id", Value: conv.ID}}
+	_, err := s.conversations.UpdateOne(ctx, byID, bson.D{
+		{Key: "$set", Value: bson.D{{Key: "unread_count", Value: 0}}},
+		{Key: "$max", Value: bson.D{{Key: "last_message_at", Value: msg.SentAt}}},
+	})
+	if err != nil {
+		return msg, true, fmt.Errorf("inbox: update conversation: %w", err)
+	}
+	_, err = s.conversations.UpdateOne(ctx,
+		append(byID, bson.E{Key: "last_message_at", Value: msg.SentAt}),
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "last_message_type", Value: msg.Type},
+			{Key: "last_message_text", Value: preview(msg.Text)},
+		}}},
+	)
+	if err != nil {
+		return msg, true, fmt.Errorf("inbox: update preview: %w", err)
+	}
+	return msg, true, nil
+}
+
+func (s *Store) messageByExternalID(ctx context.Context, tenantID, channel, externalID string) (Message, error) {
+	var m Message
+	err := s.messages.FindOne(ctx, bson.D{
+		{Key: "tenant_id", Value: tenantID}, {Key: "channel", Value: channel}, {Key: "external_id", Value: externalID},
+	}).Decode(&m)
+	if err != nil {
+		return Message{}, fmt.Errorf("inbox: find message: %w", err)
+	}
+	return m, nil
+}
+
+// setProfile saves the customer's name and picture from the provider.
+func (s *Store) setProfile(ctx context.Context, tenantID string, id bson.ObjectID, name, pictureURL string) error {
+	_, err := s.conversations.UpdateOne(ctx,
+		bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "_id", Value: id}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "display_name", Value: name}, {Key: "picture_url", Value: pictureURL}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("inbox: set profile: %w", err)
+	}
+	return nil
+}
+
 // ConversationLimit: the inbox shows the most recent conversations only (MVP).
 const ConversationLimit = 50
 

@@ -1,0 +1,23 @@
+[33m6b99ec5[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m chore: add cloudflare quick tunnel profile for real line webhooks and ignore local notes
+[33mcc7318a[m chore: add cloudflare quick tunnel profile for testing real line webhooks
+[33mbe8b4c0[m feat: add line chat inbox with signed webhooks, mongodb storage and order-from-chat
+[33m58373a9[m feat: add rate limiting for login and public storefront api with trusted proxy client ip
+[33mcbd39c6[m feat: add background worker with leader election to expire unpaid orders and clean up sessions
+[33m2049aad[m feat: add sveltekit storefront with guest checkout and order tracking
+[33m6e4159e[m docs: add readme with screenshots and ci workflow
+[33me2921ba[m feat: add shop management pages for products and orders
+[33m8d2dffe[m feat: add nuxt merchant admin with bff cookie auth, login and register
+[33m75ecd78[m feat: add orders with stock locking, order numbers and status state machine
+[33mac85e9a[m feat: add products with rls, keyset pagination and role-based access
+[33m16fb6dc[m feat: add auth with argon2id passwords, sessions and tenant access middleware
+[33m33fb595[m feat: add tenant and user repositories with integration tests
+[33mcbd61bd[m feat: add tenant-scoped transaction helper with rls integration test
+[33mfc67035[m feat: enable row-level security with a restricted app role
+[33m226cb4b[m feat: add users, tenant members and updated_at trigger
+[33m8a60735[m feat: add golang-migrate and tenants table
+[33m1fd9b6c[m feat: connect mongodb and check both databases in readiness
+[33m6d71e5a[m feat: connect postgres with pgxpool and add readiness check
+[33m898fc9c[m feat: add gin http server with healthz and graceful shutdown
+[33m5bafaf5[m feat: load config from environment variables
+[33m76d1ab8[m chore: add docker compose with postgres and mongo
+[33m7ab5492[m chore: project skeleton and backend Dockerfile

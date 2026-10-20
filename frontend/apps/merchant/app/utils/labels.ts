@@ -59,7 +59,7 @@ export function chatSummary(type: ChatMessageType, text: string): string {
   return `[${CHAT_TYPE_LABEL[type] ?? 'ส่งข้อความประเภทอื่น'}]`
 }
 
-/** The customer's name, or a stable placeholder until LINE profiles are fetched. */
+/** The customer's LINE name, or a stable placeholder while it is unknown. */
 export function conversationName(c: Conversation): string {
   return c.display_name || `ลูกค้า LINE …${c.customer_ref}`
 }
