@@ -23,8 +23,8 @@ jobs:
     # service stopped starting. CI should change only when we change it.
     runs-on: ubuntu-24.04
 
-    # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres),
-    # and MongoDB for the chat inbox tests.
+    # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres).
+    # MongoDB is started in a step below instead (see "Start MongoDB").
     services:
       postgres:
         image: postgres:18-alpine
@@ -38,19 +38,6 @@ jobs:
           --health-cmd "pg_isready -U mscs -d mscs"
           --health-interval 5s
           --health-timeout 3s
-          --health-retries 10
-      mongo:
-        # An exact version: a floating tag (8.0) can change under us between two runs.
-        image: mongo:8.0.32
-        env:
-          MONGO_INITDB_ROOT_USERNAME: mscs
-          MONGO_INITDB_ROOT_PASSWORD: ci-mongo
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1}).ok'"
-          --health-interval 5s
-          --health-timeout 5s
           --health-retries 10
 
     env:
@@ -67,6 +54,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      # Not a service container: since 2026-10-19 the MongoDB service often failed with only
+      # "Failed to initialize container", and a service's logs cannot be seen. Here we wait
+      # longer, and if it still does not start, its last log lines become an error annotation
+      # (visible in the run summary and through the public API).
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongo -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=mscs -e MONGO_INITDB_ROOT_PASSWORD=ci-mongo \
+            mongo:8.0.32
+          for _ in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' >/dev/null 2>&1; then
+              echo "MongoDB is up"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs mongo 2>&1 | tail -n 40
+          echo "::error title=MongoDB did not start::$(docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}}' mongo) $(docker logs mongo 2>&1 | tail -n 8 | tr '\n' ' ' | cut -c1-900)"
+          exit 1
 
       - uses: actions/setup-go@v7
         with:
