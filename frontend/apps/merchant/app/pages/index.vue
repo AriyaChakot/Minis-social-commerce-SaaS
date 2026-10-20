@@ -29,9 +29,19 @@ const { user, memberships } = useAuth()
           </div>
           <UBadge :color="ROLE_COLOR[m.role]" variant="subtle" :label="ROLE_LABEL[m.role]" />
         </div>
+        <UAlert
+          v-if="m.tenant.status === 'suspended'"
+          class="mt-3"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-ban"
+          title="ร้านถูกระงับโดยผู้ดูแลระบบ"
+          :description="m.tenant.suspended_reason || undefined"
+        />
 
         <template #footer>
-          <UButton block :to="`/shops/${m.tenant.id}`" trailing-icon="i-lucide-arrow-right" label="จัดการร้าน" />
+          <UButton v-if="m.tenant.status === 'suspended'" block disabled color="neutral" variant="subtle" label="ใช้งานไม่ได้ระหว่างถูกระงับ" />
+          <UButton v-else block :to="`/shops/${m.tenant.id}`" trailing-icon="i-lucide-arrow-right" label="จัดการร้าน" />
         </template>
       </UCard>
     </div>

@@ -31,7 +31,9 @@ if ($goArgs.Count -gt 0 -and $goArgs[0] -eq '--db') {
     # Passed by name only (-e DATABASE_URL), so the password never appears in the process list.
     $env:DATABASE_URL = "postgres://mscs_app:$($vars.APP_DB_PASSWORD)@postgres:5432/$($vars.POSTGRES_DB)?sslmode=disable"
     $env:MONGO_URI = "mongodb://$($vars.MONGO_USER):$($vars.MONGO_PASSWORD)@mongo:27017/?authSource=admin"
-    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL', '-e', 'MONGO_URI')
+    # The owner, for test setup the app role may not do (see dbtest.OwnerPool).
+    $env:DATABASE_OWNER_URL = "postgres://$($vars.POSTGRES_USER):$($vars.POSTGRES_PASSWORD)@postgres:5432/$($vars.POSTGRES_DB)?sslmode=disable"
+    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL', '-e', 'MONGO_URI', '-e', 'DATABASE_OWNER_URL')
 }
 
 try {
@@ -43,5 +45,5 @@ try {
     exit $LASTEXITCODE
 }
 finally {
-    Remove-Item Env:DATABASE_URL, Env:MONGO_URI -ErrorAction SilentlyContinue
+    Remove-Item Env:DATABASE_URL, Env:MONGO_URI, Env:DATABASE_OWNER_URL -ErrorAction SilentlyContinue
 }

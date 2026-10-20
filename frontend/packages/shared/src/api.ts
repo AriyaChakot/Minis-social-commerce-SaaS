@@ -42,6 +42,8 @@ export interface Tenant {
   slug: string
   name: string
   status: 'active' | 'suspended'
+  /** Why the platform suspended the shop; empty while active. */
+  suspended_reason: string
   created_at: Timestamp
   updated_at: Timestamp
 }
@@ -274,4 +276,52 @@ export interface LineChannel {
   bot_basic_id: string
   created_at: Timestamp
   updated_at: Timestamp
+}
+
+// --- Platform console (/api/v1/platform, platform admins only) ---
+
+/** A shop as the platform sees it: counts and sums only, no customers or orders. */
+export interface PlatformTenant {
+  id: ID
+  slug: string
+  name: string
+  status: 'active' | 'suspended'
+  suspended_reason: string
+  suspended_at: Timestamp | null
+  created_at: Timestamp
+  owner_email: string
+  member_count: number
+  /** Products on sale. */
+  product_count: number
+  order_count: number
+  /** Paid, shipped and completed orders. */
+  revenue_satang: number
+  last_order_at: Timestamp | null
+}
+
+/** One Thai calendar day; days without orders are included with zeros. */
+export interface PlatformDailyPoint {
+  /** YYYY-MM-DD */
+  day: string
+  orders: number
+  revenue_satang: number
+}
+
+export interface PlatformOverview {
+  tenants: { total: number, active: number, suspended: number }
+  users: number
+  /** Totals of `daily` (the last 30 days). */
+  orders: number
+  revenue_satang: number
+  daily: PlatformDailyPoint[]
+}
+
+export interface PlatformAuditEntry {
+  id: ID
+  action: 'tenant.suspend' | 'tenant.reactivate'
+  reason: string
+  created_at: Timestamp
+  actor_email: string
+  tenant_id: ID
+  tenant_name: string
 }

@@ -40,6 +40,9 @@ run against a real database.
 - **Chat inbox** — connect the shop's LINE Official Account; customers' messages arrive by webhook and appear in
   one inbox per shop (unread counts, live refresh, customers' LINE names and pictures). Reply from the inbox, and
   turn a chat into an order in one click.
+- **Platform console** — a React app for the people who run MSCS: platform-wide numbers, a 30-day order chart,
+  every shop with its size and revenue, and suspending a shop (its storefront disappears, its members see why).
+  Every suspension is recorded in an append-only audit log.
 - **Background worker** — cancels storefront orders left unpaid past a payment window (the stock goes back on sale;
   the customer sees the deadline and the reason), and deletes expired sessions. Runs safely with several replicas.
 
@@ -49,6 +52,7 @@ run against a real database.
 flowchart LR
     B[Merchant browser<br/>Vue / Nuxt UI] -- "/api/* + HttpOnly cookie" --> N[Nuxt server<br/>BFF]
     C[Customer browser<br/>Svelte] -- "pages + form actions" --> S[SvelteKit server<br/>storefront]
+    A[Platform admin browser<br/>React SPA] -- "/api/v1/platform/...<br/>HttpOnly cookie from the API" --> G
     N -- "Bearer token<br/>/api/v1/..." --> G[Go API<br/>Gin]
     S -- "public endpoints<br/>/api/v1/public/..." --> G
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
@@ -59,7 +63,9 @@ flowchart LR
     W[Go worker<br/>leader-elected] -- "advisory lock + jobs<br/>role mscs_app" --> P
 ```
 
-Browsers never call the Go API directly: each frontend has its own server (Nuxt / SvelteKit) that does.
+The merchant and customer browsers never call the Go API directly: their frontends have a server (Nuxt /
+SvelteKit) that does. The platform console is a static React app with no server, so it calls the API itself
+(same origin), with a session cookie the API sets: three frontends, three deliberately different patterns.
 
 The backend is a **modular monolith**: one code base and one Docker image with two programs (`cmd/api`,
 `cmd/worker`), organised by business domain (`auth`, `tenant`, `user`, `product`, `order`), each with its own
@@ -74,6 +80,7 @@ Handlers translate HTTP; services hold the business rules; repositories hold the
 | Database | PostgreSQL 18 (UUIDv7, Row-Level Security), MongoDB 8 |
 | Merchant app | Nuxt 4, Vue 3, TypeScript, Nuxt UI 4 (Tailwind CSS 4), Zod |
 | Storefront | SvelteKit 3, Svelte 5 (runes), TypeScript 6, Tailwind CSS 4 |
+| Platform console | React 19, Vite 8, React Router 7, TanStack Query 5, Tailwind CSS 4 |
 | Tooling | Docker Compose, pnpm workspaces, GitHub Actions |
 
 ## Engineering highlights
@@ -144,6 +151,13 @@ transient failures with backoff; a reply carries a browser-made id that is both 
 message's unique key, so a double click or a retry after a lost answer sends the message once. Tokens are checked
 with LINE before they are saved; customers' names are fetched best-effort, never slowing the webhook down.
 
+**A platform console that cannot see into shops.** Platform admins are not shop members, and RLS still applies
+to them: cross-shop numbers come from `SECURITY DEFINER` SQL functions that return counts and sums only. Who is an
+admin lives in a table the API role can read but not write (`REVOKE INSERT`), so no bug or stolen session can
+grant admin rights; the audit log is append-only the same way. Suspending is a compare-and-set `UPDATE` plus the
+audit row in one transaction. The console's session is an `HttpOnly; Secure; SameSite=Strict` cookie scoped to
+`/api/v1/platform`, and state-changing requests need a custom header (CSRF defense in depth).
+
 **Other details** — keyset pagination on time-ordered UUIDv7 ids, a status state machine shared (mirrored) by API
 and UI, uniform JSON errors (`{"error": {"code", "message", "details"}}`), `404` instead of `403` for shops you are
 not a member of, graceful shutdown, liveness vs readiness probes, request body size limits.
@@ -170,10 +184,20 @@ pnpm dev:merchant
 
 # 5. In a second terminal: the customer storefront (http://localhost:5173)
 pnpm dev:storefront
+
+# 6. Optional: the platform console (http://localhost:5174), see below to become an admin
+pnpm dev:platform
 ```
 
 Open http://localhost:3000, sign up, add a few products and create an order. Then open
 `http://localhost:5173/s/<your-shop-slug>` to shop as a customer — the order appears in the merchant app.
+
+Platform admins are made by the database owner, never through the API:
+
+```bash
+docker compose exec postgres psql -U mscs -d mscs \
+  -c "INSERT INTO platform_admins (user_id) SELECT id FROM users WHERE email = 'you@example.com'"
+```
 
 To try the chat inbox without a LINE account: on the shop's **Settings** page, save any 32-character hex secret
 (e.g. `openssl rand -hex 16`), then send a demo conversation with the simulator:
@@ -255,6 +279,18 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `POST` | `/public/shops/:slug/orders` | Guest order; returns the order and a one-time tracking token |
 | `GET` | `/public/shops/:slug/orders/:token` | Track a guest order |
 
+**Platform console API** (session cookie from `POST /platform/login`; platform admins only; `POST`s need the
+`X-MSCS-Platform` header):
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/platform/login` · `/platform/logout` | Console session (HttpOnly cookie) |
+| `GET` | `/platform/me` | The logged-in admin |
+| `GET` | `/platform/overview` | Shop and user counts, orders and revenue per day (30 days) |
+| `GET` | `/platform/tenants` | Every shop with its numbers (`q`, `status`) |
+| `POST` | `/platform/tenants/:tenantID/suspend` · `/reactivate` | Close / reopen a shop (`reason` required to suspend) |
+| `GET` | `/platform/audit` | Latest platform actions |
+
 `GET /healthz` (liveness) and `GET /readyz` (readiness: pings PostgreSQL and MongoDB).
 
 ## Project structure
@@ -271,6 +307,7 @@ backend/
     storefront/         public, customer-facing use cases and view types
     securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
     leader/ worker/     leader election (advisory lock), periodic jobs
+    platform/           platform console: cross-shop numbers, suspensions, audit log
     inbox/              chat inbox: LINE webhooks, conversations, messages (MongoDB), replies
     lineapi/            LINE Messaging API client (timeouts, retries, retry keys)
     secretbox/          AES-256-GCM encryption of stored credentials
@@ -280,6 +317,7 @@ backend/
 frontend/               pnpm workspace
   apps/merchant/        Nuxt merchant admin (app/ = UI, server/ = BFF)
   apps/storefront/      SvelteKit customer storefront
+  apps/platform/        React platform console (static SPA)
   packages/shared/      API types and helpers shared by all frontends
 docker/                 Postgres init script (restricted app role)
 scripts/                developer helpers
@@ -293,7 +331,7 @@ scripts/                developer helpers
 - [ ] Facebook / Instagram messages; images and stickers in the inbox
 - [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
 - [x] Rate limiting on login, registration and the public storefront API
-- [ ] Platform admin console (React)
+- [x] Platform admin console (React)
 - [ ] Staff invitations, shipping fees for storefront orders, product photos
 
 ---

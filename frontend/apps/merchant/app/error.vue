@@ -15,7 +15,7 @@ const goHome = () => clearError({ redirect: '/' })
         {{ error.statusCode }}
       </p>
       <h1 class="text-xl font-semibold">
-        {{ error.statusCode === 404 ? 'ไม่พบหน้าที่คุณต้องการ' : 'เกิดข้อผิดพลาด' }}
+        {{ error.statusCode === 404 ? 'ไม่พบหน้าที่คุณต้องการ' : error.statusCode === 403 ? 'ไม่สามารถเข้าถึงได้' : 'เกิดข้อผิดพลาด' }}
       </h1>
       <p class="max-w-md text-muted">
         {{ error.statusMessage || error.message }}

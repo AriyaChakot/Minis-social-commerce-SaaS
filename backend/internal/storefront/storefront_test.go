@@ -128,7 +128,7 @@ func TestStorefront(t *testing.T) {
 	})
 
 	t.Run("suspended shops disappear from the storefront", func(t *testing.T) {
-		if _, err := pool.Exec(ctx, `UPDATE tenants SET status = 'suspended' WHERE id = $1`, other.ID); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE tenants SET status = 'suspended', suspended_at = now(), suspended_reason = 'test' WHERE id = $1`, other.ID); err != nil {
 			t.Fatalf("suspend: %v", err)
 		}
 		if _, err := svc.Products(ctx, other.Slug); !errors.Is(err, storefront.ErrShopNotFound) {

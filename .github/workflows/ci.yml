@@ -99,13 +99,15 @@ jobs:
         env:
           DATABASE_URL: postgres://mscs_app:ci-app@localhost:5432/mscs?sslmode=disable
           MONGO_URI: mongodb://mscs:ci-mongo@localhost:27017/?authSource=admin
+          # Test setup only (e.g. making a platform admin, which the app role may not do).
+          DATABASE_OWNER_URL: postgres://mscs:ci-superuser@localhost:5432/mscs?sslmode=disable
         run: go test -race -count=1 ./...
 
       - name: Build Docker image
         run: docker build -t mscs-api:ci .
 
   frontend:
-    name: Frontend (Nuxt + SvelteKit)
+    name: Frontend (Nuxt + SvelteKit + React)
     # Pinned, not ubuntu-latest: "latest" moved to Ubuntu 26 on 2026-10-19 and the MongoDB
     # service stopped starting. CI should change only when we change it.
     runs-on: ubuntu-24.04

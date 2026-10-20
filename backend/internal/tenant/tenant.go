@@ -10,13 +10,22 @@ import (
 
 // Tenant is one merchant account (one online shop).
 type Tenant struct {
-	ID        uuid.UUID `json:"id"`
-	Slug      string    `json:"slug"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID     uuid.UUID `json:"id"`
+	Slug   string    `json:"slug"`
+	Name   string    `json:"name"`
+	Status string    `json:"status"`
+	// SuspendedReason: why the platform suspended the shop (empty when active), shown to its members.
+	SuspendedReason string    `json:"suspended_reason"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
+
+// Tenant statuses (tenants_status_valid). A suspended shop is closed: its storefront answers
+// "not found" and its members cannot use the merchant app until the platform reactivates it.
+const (
+	StatusActive    = "active"
+	StatusSuspended = "suspended"
+)
 
 // Role is a member's permission level inside one tenant.
 type Role string

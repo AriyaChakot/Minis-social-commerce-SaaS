@@ -11,6 +11,16 @@ const { data, error } = await useFetch<TenantResponse>(() => `/api/tenants/${ten
 })
 
 if (error.value || !data.value) {
+  // Suspended by the platform: members are told why (the API sends the reason).
+  const err = apiError(error.value)
+  if (err?.code === 'tenant_suspended') {
+    const reason = (err.details as { reason?: string } | undefined)?.reason
+    throw createError({
+      statusCode: 403,
+      statusMessage: `ร้านนี้ถูกระงับโดยผู้ดูแลระบบ${reason ? `: ${reason}` : ''} หากมีข้อสงสัยกรุณาติดต่อทีมงาน MSCS`,
+      fatal: true,
+    })
+  }
   // The API answers 404 for shops you are not a member of, so "not found" covers both cases.
   throw createError({ statusCode: 404, statusMessage: 'ไม่พบร้านนี้ หรือคุณไม่ได้เป็นสมาชิกของร้าน', fatal: true })
 }

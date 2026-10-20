@@ -5,8 +5,10 @@
   "scripts": {
     "dev:merchant": "pnpm --filter @mscs/merchant dev",
     "dev:storefront": "pnpm --filter @mscs/storefront dev",
+    "dev:platform": "pnpm --filter @mscs/platform dev",
     "build:merchant": "pnpm --filter @mscs/merchant build",
     "build:storefront": "pnpm --filter @mscs/storefront build",
+    "build:platform": "pnpm --filter @mscs/platform build",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }

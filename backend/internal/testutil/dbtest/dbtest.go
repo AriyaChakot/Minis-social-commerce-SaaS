@@ -34,6 +34,23 @@ func Pool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// OwnerPool connects to DATABASE_OWNER_URL: the database owner, which RLS and the app role's
+// missing privileges do not restrict. Only for test setup that the API itself must not be able
+// to do (e.g. making someone a platform admin). Skipped when unset.
+func OwnerPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	url := os.Getenv("DATABASE_OWNER_URL")
+	if url == "" {
+		t.Skip("DATABASE_OWNER_URL not set; skipping integration test")
+	}
+	pool, err := pgxpool.New(context.Background(), url)
+	if err != nil {
+		t.Fatalf("dbtest: connect as owner: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
 // Mongo connects to MONGO_URI and returns a fresh database just for this test (dropped when the
 // test ends), so tests never see each other's documents or the dev data. Without MONGO_URI the
 // test is skipped.

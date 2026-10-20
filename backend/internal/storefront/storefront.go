@@ -88,7 +88,7 @@ func NewService(pool *pgxpool.Pool, products *product.Service, orders *order.Ser
 // everything after this runs inside the tenant's RLS scope (via the product/order services).
 func (s *Service) shop(ctx context.Context, slug string) (tenant.Tenant, error) {
 	t, err := s.tenants.GetBySlug(ctx, s.pool, strings.ToLower(slug))
-	if errors.Is(err, tenant.ErrNotFound) || (err == nil && t.Status != "active") {
+	if errors.Is(err, tenant.ErrNotFound) || (err == nil && t.Status != tenant.StatusActive) {
 		return tenant.Tenant{}, ErrShopNotFound
 	}
 	return t, err

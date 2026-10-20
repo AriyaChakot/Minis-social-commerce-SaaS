@@ -16,11 +16,11 @@ import (
 // the pool or a transaction (and, through database.InTx, the RLS scope).
 type Repository struct{}
 
-const tenantColumns = `id, slug, name, status, created_at, updated_at`
+const tenantColumns = `id, slug, name, status, suspended_reason, created_at, updated_at`
 
 func scanTenant(row pgx.Row) (Tenant, error) {
 	var t Tenant
-	err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Status, &t.SuspendedReason, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }
 
@@ -91,7 +91,7 @@ func (Repository) MemberRole(ctx context.Context, db database.DBTX, tenantID, us
 // is what lets one user see their memberships across tenants.
 func (Repository) ListMemberships(ctx context.Context, db database.DBTX, userID uuid.UUID) ([]Membership, error) {
 	rows, err := db.Query(ctx,
-		`SELECT t.id, t.slug, t.name, t.status, t.created_at, t.updated_at, m.role
+		`SELECT t.id, t.slug, t.name, t.status, t.suspended_reason, t.created_at, t.updated_at, m.role
 		   FROM tenant_members m
 		   JOIN tenants t ON t.id = m.tenant_id
 		  WHERE m.user_id = $1
@@ -108,7 +108,7 @@ func (Repository) ListMemberships(ctx context.Context, db database.DBTX, userID 
 	for rows.Next() {
 		var m Membership
 		t := &m.Tenant
-		if err := rows.Scan(&t.ID, &t.Slug, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt, &m.Role); err != nil {
+		if err := rows.Scan(&t.ID, &t.Slug, &t.Name, &t.Status, &t.SuspendedReason, &t.CreatedAt, &t.UpdatedAt, &m.Role); err != nil {
 			return nil, fmt.Errorf("tenant: scan membership: %w", err)
 		}
 		memberships = append(memberships, m)

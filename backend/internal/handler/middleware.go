@@ -60,6 +60,12 @@ func RequireTenantMember(svc *auth.Service) gin.HandlerFunc {
 			writeInternal(c, err)
 			return
 		}
+		// 403 with the reason: the member knows the shop, they should know why it is closed.
+		if t.Status == tenant.StatusSuspended {
+			writeErrorDetails(c, http.StatusForbidden, "tenant_suspended", "this shop is suspended by the platform",
+				gin.H{"reason": t.SuspendedReason})
+			return
+		}
 		c.Set(ctxTenantKey, t)
 		c.Set(ctxRoleKey, role)
 		c.Next()

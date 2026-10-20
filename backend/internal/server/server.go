@@ -18,6 +18,7 @@ import (
 	"mscs/internal/handler"
 	"mscs/internal/inbox"
 	"mscs/internal/order"
+	"mscs/internal/platform"
 	"mscs/internal/product"
 	"mscs/internal/ratelimit"
 	"mscs/internal/storefront"
@@ -78,6 +79,8 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
 	inboxH := handler.NewInboxHandler(deps.Inbox)
+	platformSvc := platform.NewService(deps.Postgres)
+	platformH := handler.NewPlatformHandler(authSvc, platformSvc, loginByEmail)
 	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc, cfg.PaymentWindow))
 
 	api := r.Group("/api/v1")
@@ -125,6 +128,17 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		managers.PATCH("/products/:productID", productH.Update)
 		managers.DELETE("/products/:productID", productH.Archive)
 		managers.PUT("/channels/line", inboxH.ConnectLINE)
+
+		// The platform console (React SPA): its own cookie session, platform admins only.
+		api.POST("/platform/login", limitAuth, platformH.Login)
+		console := api.Group("/platform", handler.RequirePlatformAdmin(authSvc, platformSvc))
+		console.POST("/logout", platformH.Logout)
+		console.GET("/me", platformH.Me)
+		console.GET("/overview", platformH.Overview)
+		console.GET("/audit", platformH.Audit)
+		console.GET("/tenants", platformH.Tenants)
+		console.POST("/tenants/:tenantID/suspend", platformH.Suspend)
+		console.POST("/tenants/:tenantID/reactivate", platformH.Reactivate)
 	}
 
 	return &http.Server{
