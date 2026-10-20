@@ -97,6 +97,19 @@ export interface Product {
   status: ProductStatus
   created_at: Timestamp
   updated_at: Timestamp
+  /** Photos in display order; the first is the cover. */
+  images: ProductImage[]
+}
+
+/** A product photo. Files never change: a new photo gets a new URL (cache-friendly). */
+export interface ProductImage {
+  id: ID
+  /** Up to 1200 px. */
+  url: string
+  /** Up to 400 px, for lists and grids. */
+  thumb_url: string
+  width: number
+  height: number
 }
 
 export interface CreateProductRequest {
@@ -177,6 +190,7 @@ export interface StorefrontProduct {
   description: string
   price_satang: Satang
   stock: number
+  images: ProductImage[]
 }
 
 export interface StorefrontOrderLine {

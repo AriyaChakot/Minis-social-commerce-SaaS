@@ -6,13 +6,17 @@ export default defineEventHandler(async (event) => {
   const path = getRouterParam(event, 'path') ?? ''
   const method = event.method
   const hasBody = !['GET', 'HEAD', 'DELETE'].includes(method)
+  const contentType = getRequestHeader(event, 'content-type')
+  // Forwarded byte for byte, so the Go API sees exactly what the browser sent. File uploads
+  // (multipart) are binary: read as bytes, since decoding them as UTF-8 text would corrupt them.
+  const binary = contentType?.startsWith('multipart/') ?? false
+  const raw = hasBody ? await readRawBody(event, binary ? false : 'utf8') : undefined
 
   const result = await callApi(event, `/${path}`, {
     method,
     query: getQuery(event),
-    // Raw text: forwarded byte for byte, so the Go API sees exactly what the browser sent.
-    body: hasBody ? ((await readRawBody(event, 'utf8')) ?? '') : undefined,
-    contentType: getRequestHeader(event, 'content-type'),
+    body: hasBody ? (raw ?? '') : undefined,
+    contentType,
   })
   return relay(event, result)
 })

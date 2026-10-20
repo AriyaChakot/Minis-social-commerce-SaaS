@@ -50,6 +50,7 @@ func TestTrustedProxies(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://example")
 	t.Setenv("MONGO_DB", "mscs")
 	t.Setenv("DATA_ENCRYPTION_KEY", testKey)
+	setS3Env(t)
 
 	t.Setenv("TRUSTED_PROXIES", " 172.16.0.0/12, 10.0.0.5 ,")
 	cfg, err := Load()
@@ -74,10 +75,17 @@ func TestTrustedProxies(t *testing.T) {
 // testKey is 32 zero bytes, base64-encoded.
 const testKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
+func setS3Env(t *testing.T) {
+	t.Setenv("S3_ENDPOINT", "storage:8333")
+	t.Setenv("S3_ACCESS_KEY", "key")
+	t.Setenv("S3_SECRET_KEY", "secret")
+}
+
 func TestDataEncryptionKey(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("MONGO_URI", "mongodb://example")
 	t.Setenv("MONGO_DB", "mscs")
+	setS3Env(t)
 
 	t.Setenv("DATA_ENCRYPTION_KEY", "")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DATA_ENCRYPTION_KEY") {

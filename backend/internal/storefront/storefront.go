@@ -33,6 +33,8 @@ type Product struct {
 	Description string    `json:"description"`
 	PriceSatang int64     `json:"price_satang"`
 	Stock       int       `json:"stock"`
+	// Photos (URLs only), the cover first.
+	Images []product.Image `json:"images"`
 }
 
 type OrderLine struct {
@@ -115,7 +117,7 @@ func (s *Service) Products(ctx context.Context, slug string) ([]Product, error) 
 	}
 	out := make([]Product, len(page.Items))
 	for i, p := range page.Items {
-		out[i] = Product{ID: p.ID, Name: p.Name, Description: p.Description, PriceSatang: p.PriceSatang, Stock: p.Stock}
+		out[i] = Product{ID: p.ID, Name: p.Name, Description: p.Description, PriceSatang: p.PriceSatang, Stock: p.Stock, Images: p.Images}
 	}
 	return out, nil
 }

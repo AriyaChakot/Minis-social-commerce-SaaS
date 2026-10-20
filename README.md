@@ -32,6 +32,7 @@ run against a real database.
 - **Accounts & shops** — sign up creates a user, their first shop and the owner membership in one transaction.
 - **Roles per shop** — `owner`, `admin`, `staff`. Staff can process orders but cannot edit the catalog or cancel orders.
 - **Products** — create, edit, search, keyset pagination, soft delete ("stop selling") so past orders stay intact.
+  Up to 5 photos per product (upload, reorder the cover, delete), shown in the merchant app and on the storefront.
 - **Orders** — multi-item orders with stock reservation, per-shop order numbers (`#1001`, `#1002`…), status
   state machine with timestamps, cancellation that returns stock.
 - **Merchant admin web app** — server-rendered Nuxt app with form validation, toasts, confirmation dialogs.
@@ -57,6 +58,7 @@ flowchart LR
     S -- "public endpoints<br/>/api/v1/public/..." --> G
     G -- "pgx pool, role mscs_app<br/>RLS enforced" --> P[(PostgreSQL 18)]
     G -- "chat inbox<br/>conversations, messages" --> M[(MongoDB 8)]
+    G -- "product photos<br/>S3 API" --> O[(Object storage<br/>SeaweedFS / S3)]
     L[LINE Platform] -- "webhook<br/>HMAC-signed" --> G
     G -- "replies, profiles<br/>Messaging API" --> L
     MG[golang-migrate] -- "schema owner role" --> P
@@ -78,6 +80,7 @@ Handlers translate HTTP; services hold the business rules; repositories hold the
 |---|---|
 | API | Go 1.26, Gin, pgx v5, golang-migrate |
 | Database | PostgreSQL 18 (UUIDv7, Row-Level Security), MongoDB 8 |
+| Files | S3-compatible object storage (SeaweedFS locally; AWS S3 / Cloudflare R2 in production), minio-go |
 | Merchant app | Nuxt 4, Vue 3, TypeScript, Nuxt UI 4 (Tailwind CSS 4), Zod |
 | Storefront | SvelteKit 3, Svelte 5 (runes), TypeScript 6, Tailwind CSS 4 |
 | Platform console | React 19, Vite 8, React Router 7, TanStack Query 5, Tailwind CSS 4 |
@@ -150,6 +153,16 @@ encryption existed are converted at startup (expand → migrate → contract). T
 transient failures with backoff; a reply carries a browser-made id that is both LINE's `X-Line-Retry-Key` and the
 message's unique key, so a double click or a retry after a lost answer sends the message once. Tokens are checked
 with LINE before they are saved; customers' names are fetched best-effort, never slowing the webhook down.
+
+**Photo uploads treated as untrusted input.** An upload is never stored as sent: the API detects the type from
+the bytes (not the file name or `Content-Type`), reads the dimensions from the header *before* decoding so a tiny
+"decompression bomb" cannot claim 100,000 × 100,000 pixels, applies the EXIF orientation (phone photos would come
+out sideways), then re-encodes a large JPEG and a thumbnail — which drops all metadata, including the GPS position
+a phone puts in every photo (for a home seller: their home). Files go to S3-compatible storage before their
+database row, which is written under a row lock on the product (5 photos at most, even when uploads race); if
+the row cannot be written, the files are removed again. The bucket stays private: `GET /api/v1/media/…` serves the
+files with `Cache-Control: immutable` (a photo never changes; a new one gets a new key), ready for a CDN in front.
+At most two photos are decoded at a time, bounding memory use.
 
 **A platform console that cannot see into shops.** Platform admins are not shop members, and RLS still applies
 to them: cross-shop numbers come from `SECURITY DEFINER` SQL functions that return counts and sums only. Who is an
@@ -244,7 +257,7 @@ cd frontend && pnpm typecheck
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs gofmt, `go vet`, the full test suite with
-`-race` against PostgreSQL 18 and MongoDB 8, the Docker image build, and the typecheck (`vue-tsc`, `svelte-check`) and
+`-race` against PostgreSQL 18 and MongoDB 8 (object storage is faked in memory; the S3 test runs locally), the Docker image build, and the typecheck (`vue-tsc`, `svelte-check`) and
 production build of both frontends.
 
 ## API overview
@@ -260,6 +273,9 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `GET` | `/tenants/:tenantID` | Shop details and your role |
 | `GET` `POST` | `/tenants/:tenantID/products` | List (search, status, cursor) / create |
 | `GET` `PATCH` `DELETE` | `/tenants/:tenantID/products/:productID` | Read / partial update / stop selling |
+| `POST` | `/tenants/:tenantID/products/:productID/images` | Upload a photo (`multipart/form-data`, field `file`) |
+| `DELETE` | `/tenants/:tenantID/products/:productID/images/:imageID` | Delete a photo |
+| `POST` | `/tenants/:tenantID/products/:productID/images/:imageID/cover` | Make it the cover photo |
 | `GET` `POST` | `/tenants/:tenantID/orders` | List (status, search, cursor) / create |
 | `GET` | `/tenants/:tenantID/orders/:orderID` | Order with its lines |
 | `POST` | `/tenants/:tenantID/orders/:orderID/status` | Move along the state machine |
@@ -291,6 +307,8 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `POST` | `/platform/tenants/:tenantID/suspend` · `/reactivate` | Close / reopen a shop (`reason` required to suspend) |
 | `GET` | `/platform/audit` | Latest platform actions |
 
+`GET /media/*key` serves product photos (public, immutable, cacheable).
+
 `GET /healthz` (liveness) and `GET /readyz` (readiness: pings PostgreSQL and MongoDB).
 
 ## Project structure
@@ -311,6 +329,8 @@ backend/
     inbox/              chat inbox: LINE webhooks, conversations, messages (MongoDB), replies
     lineapi/            LINE Messaging API client (timeouts, retries, retry keys)
     secretbox/          AES-256-GCM encryption of stored credentials
+    storage/            S3-compatible object storage (and an in-memory fake for tests)
+    imageproc/          photo checks, EXIF orientation, resizing, metadata removal
     database/           pool, RLS-scoped transactions (InTx), shared helpers
     handler/ server/    HTTP handlers, middleware, routes
   migrations/           SQL migrations (golang-migrate)
@@ -332,7 +352,9 @@ scripts/                developer helpers
 - [x] Background worker: expire unpaid storefront orders, clean up sessions (leader election via advisory locks)
 - [x] Rate limiting on login, registration and the public storefront API
 - [x] Platform admin console (React)
-- [ ] Staff invitations, shipping fees for storefront orders, product photos
+- [x] Product photos (object storage, safe image processing)
+- [ ] Staff invitations, shipping fees for storefront orders
+- [ ] Deploy to production (domain, HTTPS, CDN, backups)
 
 ---
 

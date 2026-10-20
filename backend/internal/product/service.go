@@ -32,10 +32,57 @@ func (e *ValidationError) Error() string {
 type Service struct {
 	pool *pgxpool.Pool
 	repo Repository
+	// mediaBaseURL + object key = an image URL (see WithMediaBaseURL).
+	mediaBaseURL string
 }
 
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+// Option configures a Service.
+type Option func(*Service)
+
+// WithMediaBaseURL sets where browsers load product photos from: the API's /media route, or
+// a CDN in front of it. Default: the API's route on the same origin.
+func WithMediaBaseURL(u string) Option {
+	return func(s *Service) { s.mediaBaseURL = u }
+}
+
+func NewService(pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{pool: pool, mediaBaseURL: "/api/v1/media/"}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// withImages fills the Images of the given products, in one query (not one per product).
+func (s *Service) withImages(ctx context.Context, db pgx.Tx, tenantID uuid.UUID, items []Product) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(items))
+	for i, p := range items {
+		ids[i] = p.ID
+	}
+	rows, err := s.repo.imagesOf(ctx, db, tenantID, ids)
+	if err != nil {
+		return err
+	}
+	byProduct := map[uuid.UUID][]Image{}
+	for _, r := range rows {
+		byProduct[r.ProductID] = append(byProduct[r.ProductID], Image{
+			ID:       r.ID,
+			URL:      s.mediaBaseURL + LargeKey(r.Key),
+			ThumbURL: s.mediaBaseURL + ThumbKey(r.Key),
+			Width:    r.Width,
+			Height:   r.Height,
+		})
+	}
+	for i := range items {
+		items[i].Images = byProduct[items[i].ID]
+		if items[i].Images == nil {
+			items[i].Images = []Image{}
+		}
+	}
+	return nil
 }
 
 func (s *Service) inTenant(ctx context.Context, tenantID uuid.UUID, fn func(tx pgx.Tx) error) error {
@@ -56,6 +103,7 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 		p, err = s.repo.Create(ctx, tx, tenantID, in)
 		return err
 	})
+	p.Images = []Image{}
 	return p, err
 }
 
@@ -63,7 +111,12 @@ func (s *Service) Get(ctx context.Context, tenantID, id uuid.UUID) (Product, err
 	var p Product
 	err := s.inTenant(ctx, tenantID, func(tx pgx.Tx) error {
 		var err error
-		p, err = s.repo.Get(ctx, tx, tenantID, id)
+		if p, err = s.repo.Get(ctx, tx, tenantID, id); err != nil {
+			return err
+		}
+		one := []Product{p}
+		err = s.withImages(ctx, tx, tenantID, one)
+		p = one[0]
 		return err
 	})
 	return p, err
@@ -83,8 +136,10 @@ func (s *Service) List(ctx context.Context, tenantID uuid.UUID, params ListParam
 	var items []Product
 	err := s.inTenant(ctx, tenantID, func(tx pgx.Tx) error {
 		var err error
-		items, err = s.repo.List(ctx, tx, tenantID, params)
-		return err
+		if items, err = s.repo.List(ctx, tx, tenantID, params); err != nil {
+			return err
+		}
+		return s.withImages(ctx, tx, tenantID, items)
 	})
 	if err != nil {
 		return Page{}, err
@@ -122,7 +177,12 @@ func (s *Service) Update(ctx context.Context, tenantID, id uuid.UUID, in UpdateI
 	var p Product
 	err := s.inTenant(ctx, tenantID, func(tx pgx.Tx) error {
 		var err error
-		p, err = s.repo.Update(ctx, tx, tenantID, id, in)
+		if p, err = s.repo.Update(ctx, tx, tenantID, id, in); err != nil {
+			return err
+		}
+		one := []Product{p}
+		err = s.withImages(ctx, tx, tenantID, one)
+		p = one[0]
 		return err
 	})
 	return p, err

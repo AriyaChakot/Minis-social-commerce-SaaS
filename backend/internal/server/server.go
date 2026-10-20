@@ -21,6 +21,7 @@ import (
 	"mscs/internal/platform"
 	"mscs/internal/product"
 	"mscs/internal/ratelimit"
+	"mscs/internal/storage"
 	"mscs/internal/storefront"
 	"mscs/internal/tenant"
 )
@@ -35,6 +36,8 @@ type Deps struct {
 	Mongo    *database.Mongo
 	// Inbox is built in main, which also runs its startup tasks (indexes, secret encryption).
 	Inbox *inbox.Service
+	// Storage holds the product photos (S3-compatible object storage).
+	Storage storage.Store
 }
 
 // New returns an *http.Server that is configured but not started yet.
@@ -50,7 +53,13 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	r.Use(gin.Logger())   // log every request
 	r.Use(gin.Recovery()) // turn a panic into a 500 response instead of crashing the process
 	r.Use(func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		// Routing has already happened, so FullPath (the route pattern) is known here: the photo
+		// upload route gets a bigger limit, every other route keeps the small one.
+		limit := int64(maxBodyBytes)
+		if c.Request.Method == http.MethodPost && strings.HasSuffix(c.FullPath(), "/products/:productID/images") {
+			limit = handler.MaxUploadBytes
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()
 	})
 
@@ -74,7 +83,8 @@ func New(cfg config.Config, deps Deps) *http.Server {
 
 	authSvc := auth.NewService(deps.Postgres)
 	authH := handler.NewAuthHandler(authSvc, loginByEmail)
-	productSvc := product.NewService(deps.Postgres)
+	productSvc := product.NewService(deps.Postgres, product.WithMediaBaseURL(cfg.MediaBaseURL))
+	imageH := handler.NewImageHandler(product.NewImageService(productSvc, deps.Storage), deps.Storage)
 	orderSvc := order.NewService(deps.Postgres)
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
@@ -97,6 +107,9 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		store.GET("/products", limitReads, storeH.Products)
 		store.POST("/orders", handler.RateLimitByIP(guestOrderByIP), storeH.PlaceOrder)
 		store.GET("/orders/:token", limitReads, storeH.TrackOrder)
+
+		// Product photos, for every browser (like images on any website); see ImageHandler.Serve.
+		api.GET("/media/*key", imageH.Serve)
 
 		// Called by LINE's servers, not by a browser: authenticated by the body's HMAC signature.
 		// Not rate-limited per IP: LINE delivers for every shop from a few addresses.
@@ -127,6 +140,9 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		managers.POST("/products", productH.Create)
 		managers.PATCH("/products/:productID", productH.Update)
 		managers.DELETE("/products/:productID", productH.Archive)
+		managers.POST("/products/:productID/images", imageH.Upload)
+		managers.DELETE("/products/:productID/images/:imageID", imageH.Delete)
+		managers.POST("/products/:productID/images/:imageID/cover", imageH.MakeCover)
 		managers.PUT("/channels/line", inboxH.ConnectLINE)
 
 		// The platform console (React SPA): its own cookie session, platform admins only.

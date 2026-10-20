@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +34,21 @@ type Config struct {
 
 	// LineAPIBaseURL: where LINE's Messaging API is. Only changed to point at a fake in tests.
 	LineAPIBaseURL string
+
+	// Object storage (S3-compatible) for product photos.
+	S3 S3Config
+	// MediaBaseURL: where browsers load photos from (the API's /api/v1/media/ route, or a CDN in
+	// front of it). It must be absolute when pages are served from another origin than the API.
+	MediaBaseURL string
+}
+
+// S3Config: an S3-compatible bucket (SeaweedFS in development; AWS S3, Cloudflare R2... in production).
+type S3Config struct {
+	Endpoint  string // host:port, no scheme
+	AccessKey string
+	SecretKey string
+	Bucket    string
+	UseSSL    bool
 }
 
 // WorkerConfig holds the settings of the background worker (cmd/worker).
@@ -53,6 +69,15 @@ func Load() (Config, error) {
 		MongoDB:     os.Getenv("MONGO_DB"),
 		// The literal, not lineapi.DefaultBaseURL: config stays free of feature packages.
 		LineAPIBaseURL: getEnv("LINE_API_BASE_URL", "https://api.line.me"),
+		S3: S3Config{
+			Endpoint:  os.Getenv("S3_ENDPOINT"),
+			AccessKey: os.Getenv("S3_ACCESS_KEY"),
+			SecretKey: os.Getenv("S3_SECRET_KEY"),
+			Bucket:    getEnv("S3_BUCKET", "mscs-media"),
+			UseSSL:    os.Getenv("S3_USE_SSL") == "true",
+		},
+		// Always ends with "/": URLs are built as MediaBaseURL + key.
+		MediaBaseURL: strings.TrimRight(getEnv("MEDIA_BASE_URL", "/api/v1/media"), "/") + "/",
 	}
 	key := os.Getenv("DATA_ENCRYPTION_KEY")
 
@@ -69,6 +94,12 @@ func Load() (Config, error) {
 	if key == "" {
 		missing = append(missing, "DATA_ENCRYPTION_KEY")
 	}
+	for name, v := range map[string]string{"S3_ENDPOINT": cfg.S3.Endpoint, "S3_ACCESS_KEY": cfg.S3.AccessKey, "S3_SECRET_KEY": cfg.S3.SecretKey} {
+		if v == "" {
+			missing = append(missing, name)
+		}
+	}
+	slices.Sort(missing) // map order is random; keep the message stable
 	if len(missing) > 0 {
 		return Config{}, fmt.Errorf("config: missing required env vars: %s", strings.Join(missing, ", "))
 	}

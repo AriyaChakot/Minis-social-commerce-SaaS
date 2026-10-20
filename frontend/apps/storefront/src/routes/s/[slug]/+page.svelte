@@ -17,10 +17,23 @@
       {@const inCart = cart.quantityOf(product.id)}
       {@const soldOut = product.stock === 0}
       <li class="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white">
-        <!-- No product photos yet: a colored tile with the first letter stands in for one. -->
-        <div class="flex aspect-4/3 items-center justify-center bg-linear-to-br {swatch(product.name)} text-5xl font-semibold text-white/80">
-          {initial(product.name)}
-        </div>
+        {#if product.images[0]}
+          <!-- The thumbnail (400 px) is plenty for a grid tile; width/height reserve the space
+               before it loads, so the page does not jump. -->
+          <img
+            src={product.images[0].thumb_url}
+            alt={product.name}
+            width={product.images[0].width}
+            height={product.images[0].height}
+            loading="lazy"
+            class="aspect-4/3 w-full bg-stone-100 object-cover"
+          />
+        {:else}
+          <!-- No photo: a colored tile with the first letter stands in for one. -->
+          <div class="flex aspect-4/3 items-center justify-center bg-linear-to-br {swatch(product.name)} text-5xl font-semibold text-white/80">
+            {initial(product.name)}
+          </div>
+        {/if}
 
         <div class="flex flex-1 flex-col gap-1 p-3">
           <h2 class="line-clamp-2 font-medium leading-snug">{product.name}</h2>

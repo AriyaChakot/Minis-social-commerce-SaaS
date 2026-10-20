@@ -24,7 +24,7 @@ if ($goArgs.Count -gt 0 -and $goArgs[0] -eq '--db') {
 
     # Read .env into a hashtable (KEY=VALUE lines only).
     $vars = @{}
-    Get-Content (Join-Path $root '.env') | Where-Object { $_ -match '^\s*([A-Z_]+)=(.*)$' } |
+    Get-Content (Join-Path $root '.env') | Where-Object { $_ -match '^\s*([A-Z][A-Z0-9_]*)=(.*)$' } |
         ForEach-Object { $vars[$Matches[1]] = $Matches[2] }
 
     # Join the compose network and log in as the restricted app role, so RLS applies.
@@ -33,7 +33,12 @@ if ($goArgs.Count -gt 0 -and $goArgs[0] -eq '--db') {
     $env:MONGO_URI = "mongodb://$($vars.MONGO_USER):$($vars.MONGO_PASSWORD)@mongo:27017/?authSource=admin"
     # The owner, for test setup the app role may not do (see dbtest.OwnerPool).
     $env:DATABASE_OWNER_URL = "postgres://$($vars.POSTGRES_USER):$($vars.POSTGRES_PASSWORD)@postgres:5432/$($vars.POSTGRES_DB)?sslmode=disable"
-    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL', '-e', 'MONGO_URI', '-e', 'DATABASE_OWNER_URL')
+    # Object storage (the compose "storage" service), for the S3 test of package storage.
+    $env:S3_ENDPOINT = 'storage:8333'
+    $env:S3_ACCESS_KEY = $vars.S3_ACCESS_KEY
+    $env:S3_SECRET_KEY = $vars.S3_SECRET_KEY
+    $dockerArgs += @('--network', 'mscs_default', '-e', 'DATABASE_URL', '-e', 'MONGO_URI', '-e', 'DATABASE_OWNER_URL',
+        '-e', 'S3_ENDPOINT', '-e', 'S3_ACCESS_KEY', '-e', 'S3_SECRET_KEY')
 }
 
 try {
@@ -45,5 +50,5 @@ try {
     exit $LASTEXITCODE
 }
 finally {
-    Remove-Item Env:DATABASE_URL, Env:MONGO_URI, Env:DATABASE_OWNER_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:DATABASE_URL, Env:MONGO_URI, Env:DATABASE_OWNER_URL, Env:S3_ENDPOINT, Env:S3_ACCESS_KEY, Env:S3_SECRET_KEY -ErrorAction SilentlyContinue
 }

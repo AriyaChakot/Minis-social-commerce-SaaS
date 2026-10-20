@@ -17,6 +17,7 @@ import (
 	"mscs/internal/lineapi"
 	"mscs/internal/secretbox"
 	"mscs/internal/server"
+	"mscs/internal/storage"
 )
 
 func main() {
@@ -71,7 +72,17 @@ func main() {
 		log.Printf("inbox: encrypted %d LINE channel secret(s) stored in plaintext", n)
 	}
 
-	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg, Inbox: inboxSvc})
+	// Object storage for product photos; the bucket is created on first start.
+	media, err := storage.NewS3(storage.S3Config(cfg.S3))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := media.EnsureBucket(ctx); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("object storage ready: bucket=%s", cfg.S3.Bucket)
+
+	srv := server.New(cfg, server.Deps{Postgres: pg, Mongo: mg, Inbox: inboxSvc, Storage: media})
 
 	// ListenAndServe blocks forever, so run it in a goroutine and keep main free to wait for the signal.
 	go func() {

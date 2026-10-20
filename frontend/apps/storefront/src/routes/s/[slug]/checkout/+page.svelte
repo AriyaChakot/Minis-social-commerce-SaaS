@@ -44,9 +44,13 @@
     <ul class="divide-y divide-stone-200 self-start rounded-2xl border border-stone-200 bg-white lg:col-span-3">
       {#each lines as line (line.productId)}
         <li class="flex items-center gap-3 p-3">
-          <div class="flex size-14 shrink-0 items-center justify-center rounded-xl bg-linear-to-br {swatch(line.product?.name ?? '?')} text-xl font-semibold text-white/80">
-            {line.product ? initial(line.product.name) : '?'}
-          </div>
+          {#if line.product?.images[0]}
+            <img src={line.product.images[0].thumb_url} alt="" class="size-14 shrink-0 rounded-xl bg-stone-100 object-cover" />
+          {:else}
+            <div class="flex size-14 shrink-0 items-center justify-center rounded-xl bg-linear-to-br {swatch(line.product?.name ?? '?')} text-xl font-semibold text-white/80">
+              {line.product ? initial(line.product.name) : '?'}
+            </div>
+          {/if}
           <div class="min-w-0 flex-1">
             {#if line.product}
               <p class="truncate font-medium">{line.product.name}</p>

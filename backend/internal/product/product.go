@@ -20,6 +20,17 @@ type Product struct {
 	Status      Status    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Images in display order; the first one is the cover. Never null in JSON.
+	Images []Image `json:"images"`
+}
+
+// Image is one product photo, as URLs the browser can load.
+type Image struct {
+	ID       uuid.UUID `json:"id"`
+	URL      string    `json:"url"`       // large, up to 1200 px
+	ThumbURL string    `json:"thumb_url"` // small, up to 400 px
+	Width    int       `json:"width"`
+	Height   int       `json:"height"`
 }
 
 type Status string

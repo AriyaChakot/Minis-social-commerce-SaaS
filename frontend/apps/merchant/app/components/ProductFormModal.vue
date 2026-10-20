@@ -10,7 +10,11 @@ const props = defineProps<{
   product: Product | null
 }>()
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ saved: [product: Product] }>()
+const emit = defineEmits<{
+  saved: [product: Product]
+  /** Photos changed (the product's other fields did not): the list should refresh. */
+  imagesChanged: [product: Product]
+}>()
 
 const schema = z.object({
   name: z.string().trim().min(1, 'กรุณากรอกชื่อสินค้า').max(200),
@@ -26,11 +30,15 @@ const state = reactive({ name: '', sku: '', description: '', price: '', stock: 0
 const form = useTemplateRef('form')
 const saving = ref(false)
 const errorMessage = ref('')
-const isEdit = computed(() => props.product !== null)
+// The product as saved: the one being edited, or the new one right after "add" (photos need a
+// saved product, so after adding, the modal stays open on it to add photos).
+const current = ref<Product | null>(null)
+const isEdit = computed(() => current.value !== null)
 
 // Each time the modal opens, fill the form from the product being edited (or reset it).
 watch(open, (isOpen) => {
   if (!isOpen) return
+  current.value = props.product
   const p = props.product
   Object.assign(state, {
     name: p?.name ?? '',
@@ -56,11 +64,13 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   saving.value = true
   errorMessage.value = ''
   try {
-    const saved = isEdit.value
-      ? await $fetch<Product>(`/api/tenants/${props.shopId}/products/${props.product!.id}`, { method: 'PATCH', body })
-      : await $fetch<Product>(`/api/tenants/${props.shopId}/products`, { method: 'POST', body })
+    const created = !isEdit.value
+    const saved = created
+      ? await $fetch<Product>(`/api/tenants/${props.shopId}/products`, { method: 'POST', body })
+      : await $fetch<Product>(`/api/tenants/${props.shopId}/products/${current.value!.id}`, { method: 'PATCH', body })
     emit('saved', saved)
-    open.value = false
+    if (created) current.value = saved // stay open: now the photos can be added
+    else open.value = false
   }
   catch (e) {
     if (apiError(e)?.code === 'sku_taken') {
@@ -79,6 +89,17 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 <template>
   <UModal v-model:open="open" :title="isEdit ? 'แก้ไขสินค้า' : 'เพิ่มสินค้า'">
     <template #body>
+      <ProductImages
+        v-if="current"
+        :shop-id="shopId"
+        :product="current"
+        class="mb-5"
+        @changed="(p) => { current = p; emit('imagesChanged', p) }"
+      />
+      <p v-else class="mb-4 text-sm text-muted">
+        เพิ่มรูปสินค้าได้หลังกด “เพิ่มสินค้า”
+      </p>
+
       <UForm id="product-form" ref="form" :schema="schema" :state="state" class="space-y-4" @submit="onSubmit">
         <UFormField label="ชื่อสินค้า" name="name" required>
           <UInput v-model="state.name" class="w-full" />

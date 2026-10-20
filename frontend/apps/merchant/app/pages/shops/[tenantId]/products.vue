@@ -106,12 +106,26 @@ async function restore(p: Product) {
     <UCard :ui="{ body: 'p-0 sm:p-0' }">
       <UTable :data="items" :columns="columns" :loading="loading" empty="ยังไม่มีสินค้า">
         <template #name-cell="{ row }">
-          <p class="font-medium">
-            {{ row.original.name }}
-          </p>
-          <p v-if="row.original.sku" class="text-xs text-muted">
-            {{ row.original.sku }}
-          </p>
+          <div class="flex items-center gap-3">
+            <img
+              v-if="row.original.images[0]"
+              :src="row.original.images[0].thumb_url"
+              alt=""
+              class="size-10 shrink-0 rounded object-cover ring ring-default"
+              loading="lazy"
+            >
+            <div v-else class="flex size-10 shrink-0 items-center justify-center rounded bg-elevated text-muted">
+              <UIcon name="i-lucide-image" />
+            </div>
+            <div class="min-w-0">
+              <p class="font-medium">
+                {{ row.original.name }}
+              </p>
+              <p v-if="row.original.sku" class="text-xs text-muted">
+                {{ row.original.sku }}
+              </p>
+            </div>
+          </div>
         </template>
 
         <template #price_satang-cell="{ row }">
@@ -149,7 +163,7 @@ async function restore(p: Product) {
       <UButton color="neutral" variant="outline" label="โหลดเพิ่ม" :loading="loadingMore" @click="loadMore" />
     </div>
 
-    <ProductFormModal v-model:open="formOpen" :shop-id="shop.id" :product="editing" @saved="onSaved" />
+    <ProductFormModal v-model:open="formOpen" :shop-id="shop.id" :product="editing" @saved="onSaved" @images-changed="refresh()" />
 
     <ConfirmModal
       v-model:open="archiveOpen"
