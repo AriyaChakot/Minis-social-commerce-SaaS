@@ -19,7 +19,9 @@ concurrency:
 jobs:
   backend:
     name: Backend (Go + PostgreSQL + MongoDB)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: "latest" moved to Ubuntu 26 on 2026-10-19 and the MongoDB
+    # service stopped starting. CI should change only when we change it.
+    runs-on: ubuntu-24.04
 
     # A real PostgreSQL 18 for the integration tests (RLS can only be tested against Postgres),
     # and MongoDB for the chat inbox tests.
@@ -38,7 +40,8 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       mongo:
-        image: mongo:8.0
+        # An exact version: a floating tag (8.0) can change under us between two runs.
+        image: mongo:8.0.32
         env:
           MONGO_INITDB_ROOT_USERNAME: mscs
           MONGO_INITDB_ROOT_PASSWORD: ci-mongo
@@ -103,7 +106,9 @@ jobs:
 
   frontend:
     name: Frontend (Nuxt + SvelteKit)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: "latest" moved to Ubuntu 26 on 2026-10-19 and the MongoDB
+    # service stopped starting. CI should change only when we change it.
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
