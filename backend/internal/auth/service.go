@@ -190,6 +190,12 @@ func (s *Service) TenantAccess(ctx context.Context, tenantID, userID uuid.UUID) 
 	return t, role, err
 }
 
+// CreateSession opens a session for a user inside the caller's transaction (used by flows that
+// create the account elsewhere, such as accepting an invitation with a new account).
+func (s *Service) CreateSession(ctx context.Context, db database.DBTX, userID uuid.UUID) (Session, error) {
+	return s.createSession(ctx, db, userID)
+}
+
 func (s *Service) createSession(ctx context.Context, db database.DBTX, userID uuid.UUID) (Session, error) {
 	token := newToken()
 	expiresAt := s.now().Add(SessionTTL).UTC()

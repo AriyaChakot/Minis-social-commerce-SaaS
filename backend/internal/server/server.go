@@ -23,6 +23,7 @@ import (
 	"mscs/internal/ratelimit"
 	"mscs/internal/storage"
 	"mscs/internal/storefront"
+	"mscs/internal/team"
 	"mscs/internal/tenant"
 )
 
@@ -89,6 +90,7 @@ func New(cfg config.Config, deps Deps) *http.Server {
 	productH := handler.NewProductHandler(productSvc)
 	orderH := handler.NewOrderHandler(orderSvc)
 	inboxH := handler.NewInboxHandler(deps.Inbox)
+	teamH := handler.NewTeamHandler(team.NewService(deps.Postgres, authSvc))
 	platformSvc := platform.NewService(deps.Postgres)
 	platformH := handler.NewPlatformHandler(authSvc, platformSvc, loginByEmail)
 	storeH := handler.NewStorefrontHandler(storefront.NewService(deps.Postgres, productSvc, orderSvc, cfg.PaymentWindow))
@@ -120,6 +122,12 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		authed.POST("/auth/logout", authH.Logout)
 		authed.GET("/me", authH.Me)
 
+		// Invitation links: opening one needs no account (the link is the permission); joining
+		// needs one, existing (accept) or new (register).
+		api.GET("/invitations/:token", limitAuth, teamH.Preview)
+		api.POST("/invitations/:token/register", limitAuth, teamH.Register)
+		authed.POST("/invitations/:token/accept", limitAuth, teamH.Accept)
+
 		// Routes inside one shop: the user must be a member of :tenantID.
 		shop := authed.Group("/tenants/:tenantID", handler.RequireTenantMember(authSvc))
 		shop.GET("", handler.GetTenant)
@@ -144,6 +152,10 @@ func New(cfg config.Config, deps Deps) *http.Server {
 		managers.DELETE("/products/:productID/images/:imageID", imageH.Delete)
 		managers.POST("/products/:productID/images/:imageID/cover", imageH.MakeCover)
 		managers.PUT("/channels/line", inboxH.ConnectLINE)
+		managers.GET("/team", teamH.Team)
+		managers.POST("/invitations", teamH.Invite)
+		managers.DELETE("/invitations/:invitationID", teamH.Revoke)
+		managers.DELETE("/members/:userID", teamH.RemoveMember)
 
 		// The platform console (React SPA): its own cookie session, platform admins only.
 		api.POST("/platform/login", limitAuth, platformH.Login)

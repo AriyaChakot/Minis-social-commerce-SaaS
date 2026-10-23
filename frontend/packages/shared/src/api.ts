@@ -339,3 +339,44 @@ export interface PlatformAuditEntry {
   tenant_id: ID
   tenant_name: string
 }
+
+// --- Team: members and invitations ---
+
+export interface TeamMember {
+  user_id: ID
+  email: string
+  display_name: string
+  role: Role
+  joined_at: Timestamp
+}
+
+/** A pending invitation (its link is shown only once, when created). */
+export interface TeamInvitation {
+  id: ID
+  email: string
+  role: Exclude<Role, 'owner'>
+  expires_at: Timestamp
+  created_at: Timestamp
+}
+
+export interface TeamResponse {
+  members: TeamMember[]
+  invitations: TeamInvitation[]
+  /** The logged-in user's id (to mark "you"). */
+  you: ID
+}
+
+export interface CreateInvitationResponse {
+  invitation: TeamInvitation
+  /** Put into the link /invite/<token>. Not stored by the API: this is the only time it is seen. */
+  token: string
+}
+
+/** What an invitation link shows before joining. */
+export interface InvitationPreview {
+  tenant_id: ID
+  tenant_name: string
+  email: string
+  role: Exclude<Role, 'owner'>
+  expires_at: Timestamp
+}

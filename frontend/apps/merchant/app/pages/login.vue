@@ -17,6 +17,7 @@ const state = reactive({ email: '', password: '' })
 const loading = ref(false)
 const errorMessage = ref('')
 const { login } = useAuth()
+const route = useRoute()
 
 // Until Vue has hydrated the server-rendered HTML, a click would submit the <form> natively
 // (a full page reload that loses the input). Keep the button disabled until then.
@@ -28,7 +29,8 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   errorMessage.value = ''
   try {
     await login(event.data)
-    await navigateTo('/')
+    // Back to where they were going (e.g. an invitation link), or the dashboard.
+    await navigateTo(safeRedirect(route.query.redirect))
   }
   catch (e) {
     errorMessage.value = apiErrorMessage(e)

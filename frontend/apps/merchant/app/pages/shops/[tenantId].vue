@@ -39,6 +39,7 @@ const SECTIONS = [
   { path: 'orders', label: 'ออเดอร์', icon: 'i-lucide-receipt' },
   { path: 'inbox', label: 'แชท', icon: 'i-lucide-message-circle' },
   { path: 'products', label: 'สินค้า', icon: 'i-lucide-package' },
+  { path: 'team', label: 'ทีมงาน', icon: 'i-lucide-users', managersOnly: true },
   { path: 'settings', label: 'ตั้งค่า', icon: 'i-lucide-settings', managersOnly: true },
 ]
 

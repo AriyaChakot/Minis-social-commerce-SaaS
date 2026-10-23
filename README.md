@@ -20,8 +20,10 @@ run against a real database.
 | ![Order detail](docs/screenshots/order-detail.png) | ![Products](docs/screenshots/products.png) |
 | **Storefront (customer)** | **Order tracking (customer)** |
 | ![Storefront](docs/screenshots/storefront-shop.png) | ![Order tracking](docs/screenshots/storefront-order.png) |
-| **Chat inbox (LINE)** | |
-| ![Chat inbox](docs/screenshots/inbox.png) | |
+| **Chat inbox (LINE)** | **Team** |
+| ![Chat inbox](docs/screenshots/inbox.png) | ![Team members and invitations](docs/screenshots/team.png) |
+| **Invitation link** | |
+| ![Accepting an invitation](docs/screenshots/invite.png) | |
 
 *The UI is in Thai, the language of its target users.*
 
@@ -31,6 +33,9 @@ run against a real database.
 
 - **Accounts & shops** — sign up creates a user, their first shop and the owner membership in one transaction.
 - **Roles per shop** — `owner`, `admin`, `staff`. Staff can process orders but cannot edit the catalog or cancel orders.
+- **Team** — invite people by email with a one-time link (valid 7 days) that the shop sends over LINE or chat:
+  a new person creates their account from the link, someone with an account logs in and joins. Owners invite and
+  remove admins and staff, admins only staff; pending invitations can be cancelled.
 - **Products** — create, edit, search, keyset pagination, soft delete ("stop selling") so past orders stay intact.
   Up to 5 photos per product (upload, reorder the cover, delete), shown in the merchant app and on the storefront.
 - **Orders** — multi-item orders with stock reservation, per-shop order numbers (`#1001`, `#1002`…), status
@@ -164,6 +169,17 @@ the row cannot be written, the files are removed again. The bucket stays private
 files with `Cache-Control: immutable` (a photo never changes; a new one gets a new key), ready for a CDN in front.
 At most two photos are decoded at a time, bounding memory use.
 
+**Invitation links that work once, for one person.** An invitation is a random token shown once to the
+inviter; only its SHA-256 hash is stored (like sessions and tracking links). The link is bound to the invited
+email: accepting it while logged in as someone else is refused (`403`), and registering from it creates an account
+for that email only, so a forwarded link cannot be used to join under another identity. Accepting is a
+compare-and-set `UPDATE … WHERE accepted_at IS NULL AND revoked_at IS NULL` in the same
+transaction as the membership, so two clicks at once give one membership (a test races them). A partial unique
+index keeps one open invitation per email and shop; inviting again revokes the old link. Reading an invitation by
+its token, before anyone is a member, goes through a `SECURITY DEFINER` function, since RLS hides the row otherwise.
+After login the app returns to the invitation through `?redirect=`, accepted only for paths on this site (no open
+redirect).
+
 **A platform console that cannot see into shops.** Platform admins are not shop members, and RLS still applies
 to them: cross-shop numbers come from `SECURITY DEFINER` SQL functions that return counts and sums only. Who is an
 admin lives in a table the API role can read but not write (`REVOKE INSERT`), so no bug or stolen session can
@@ -283,6 +299,13 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `GET` | `/tenants/:tenantID/conversations/:id/messages` | A conversation's messages |
 | `POST` | `/tenants/:tenantID/conversations/:id/messages` | Reply to the customer through LINE (`text`, `client_id`) |
 | `POST` | `/tenants/:tenantID/conversations/:id/read` | Mark as read |
+| `GET` | `/tenants/:tenantID/team` | Members and pending invitations (owner/admin) |
+| `POST` | `/tenants/:tenantID/invitations` | Invite (`email`, `role`); returns the one-time `token` |
+| `DELETE` | `/tenants/:tenantID/invitations/:invitationID` | Cancel an invitation |
+| `DELETE` | `/tenants/:tenantID/members/:userID` | Remove a member |
+| `GET` | `/invitations/:token` | What an invitation link is for (public) |
+| `POST` | `/invitations/:token/accept` | Join with the logged-in account (its email must match) |
+| `POST` | `/invitations/:token/register` | Create the invited account, join and start a session (public) |
 | `GET` `PUT` | `/tenants/:tenantID/channels/line` | LINE connection: channel secret and access token, both write-only (`PUT` for owner/admin) |
 | `POST` | `/webhooks/line/:channelID` | LINE webhook (authenticated by its signature) |
 
@@ -323,6 +346,7 @@ backend/
     tenant/ user/       shops, memberships, users
     product/ order/     catalog, stock, orders and their state machine
     storefront/         public, customer-facing use cases and view types
+    team/               members and invitation links
     securetoken/        random tokens + SHA-256 hashes (sessions, tracking links)
     leader/ worker/     leader election (advisory lock), periodic jobs
     platform/           platform console: cross-shop numbers, suspensions, audit log
@@ -353,7 +377,8 @@ scripts/                developer helpers
 - [x] Rate limiting on login, registration and the public storefront API
 - [x] Platform admin console (React)
 - [x] Product photos (object storage, safe image processing)
-- [ ] Staff invitations, shipping fees for storefront orders
+- [x] Staff invitations (one-time links, roles, removing members)
+- [ ] Shipping fees for storefront orders
 - [ ] Deploy to production (domain, HTTPS, CDN, backups)
 
 ---
