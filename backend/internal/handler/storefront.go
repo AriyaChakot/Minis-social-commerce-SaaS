@@ -26,6 +26,9 @@ type placeOrderRequest struct {
 	ShippingAddress string             `json:"shipping_address" binding:"required,max=1000"`
 	Note            string             `json:"note" binding:"max=2000"`
 	Items           []orderItemRequest `json:"items" binding:"required,min=1,max=100,dive"`
+	// The total the customer saw. Not a price the customer sets: the server only compares it with
+	// its own total and refuses the order if they differ.
+	ExpectedTotalSatang *int64 `json:"expected_total_satang" binding:"omitempty,min=0"`
 	// Deliberately no channel, shipping fee or prices: the server decides those.
 }
 
@@ -58,11 +61,12 @@ func (h *StorefrontHandler) PlaceOrder(c *gin.Context) {
 	}
 
 	in := storefront.PlaceOrderInput{
-		CustomerName:    req.CustomerName,
-		CustomerPhone:   req.CustomerPhone,
-		ShippingAddress: req.ShippingAddress,
-		Note:            req.Note,
-		Items:           make([]order.ItemInput, len(req.Items)),
+		CustomerName:        req.CustomerName,
+		CustomerPhone:       req.CustomerPhone,
+		ShippingAddress:     req.ShippingAddress,
+		Note:                req.Note,
+		Items:               make([]order.ItemInput, len(req.Items)),
+		ExpectedTotalSatang: req.ExpectedTotalSatang,
 	}
 	for i, it := range req.Items {
 		in.Items[i] = order.ItemInput{ProductID: it.ProductID, Quantity: it.Quantity}

@@ -136,3 +136,82 @@ func TestStorefront(t *testing.T) {
 		}
 	})
 }
+
+func TestStorefrontShipping(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.Pool(t)
+	products := product.NewService(pool)
+	orders := order.NewService(pool)
+	svc := storefront.NewService(pool, products, orders, 24*time.Hour)
+
+	shop := newShop(t, ctx, pool)
+	free := int64(60000)
+	if _, err := (tenant.Repository{}).UpdateShipping(ctx, pool, shop.ID, tenant.ShippingRates{FeeSatang: 4000, FreeFromSatang: &free}); err != nil {
+		t.Fatalf("set shipping: %v", err)
+	}
+	tee, err := products.Create(ctx, shop.ID, product.CreateInput{Name: "Tee", PriceSatang: 25000, Stock: 100})
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	bag, _ := products.Create(ctx, shop.ID, product.CreateInput{Name: "Bag", PriceSatang: 30000, Stock: 100})
+
+	guest := func(expected *int64, items ...order.ItemInput) storefront.PlaceOrderInput {
+		return storefront.PlaceOrderInput{CustomerName: "Guest", CustomerPhone: "0810000000",
+			ShippingAddress: "Bangkok", Items: items, ExpectedTotalSatang: expected}
+	}
+	total := func(v int64) *int64 { return &v }
+
+	t.Run("the cart can show the rates", func(t *testing.T) {
+		got, err := svc.Shop(ctx, shop.Slug)
+		if err != nil || got.Shipping.FeeSatang != 4000 || got.Shipping.FreeFromSatang == nil || *got.Shipping.FreeFromSatang != free {
+			t.Fatalf("want the shop's rates, got %+v err=%v", got.Shipping, err)
+		}
+	})
+
+	for _, c := range []struct {
+		name          string
+		items         []order.ItemInput
+		fee, wantTotl int64
+	}{
+		{"below the threshold pays the fee", []order.ItemInput{{ProductID: tee.ID, Quantity: 1}}, 4000, 29000},
+		{"exactly the threshold ships free", []order.ItemInput{{ProductID: bag.ID, Quantity: 2}}, 0, 60000},
+		{"above the threshold ships free", []order.ItemInput{{ProductID: tee.ID, Quantity: 3}}, 0, 75000},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			o, _, err := svc.PlaceOrder(ctx, shop.Slug, guest(total(c.wantTotl), c.items...))
+			if err != nil || o.ShippingFeeSatang != c.fee || o.TotalSatang != c.wantTotl {
+				t.Fatalf("want fee %d total %d, got %+v err=%v", c.fee, c.wantTotl, o, err)
+			}
+		})
+	}
+
+	t.Run("a total the customer did not see is refused, and takes no stock", func(t *testing.T) {
+		before, _ := products.Get(ctx, shop.ID, tee.ID)
+		// The cart showed free shipping (25000), but the shop charges 4000 below 60000.
+		_, _, err := svc.PlaceOrder(ctx, shop.Slug, guest(total(25000), order.ItemInput{ProductID: tee.ID, Quantity: 1}))
+		var changed *order.TotalChangedError
+		if !errors.As(err, &changed) || changed.ShippingFeeSatang != 4000 || changed.TotalSatang != 29000 {
+			t.Fatalf("want TotalChangedError with the new amounts, got %v", err)
+		}
+		after, _ := products.Get(ctx, shop.ID, tee.ID)
+		if after.Stock != before.Stock {
+			t.Fatalf("stock changed from %d to %d by a refused order", before.Stock, after.Stock)
+		}
+	})
+
+	t.Run("without an expected total the server's amount is used", func(t *testing.T) {
+		o, _, err := svc.PlaceOrder(ctx, shop.Slug, guest(nil, order.ItemInput{ProductID: tee.ID, Quantity: 1}))
+		if err != nil || o.TotalSatang != 29000 {
+			t.Fatalf("want total 29000, got %+v err=%v", o, err)
+		}
+	})
+
+	t.Run("the database refuses rates out of range", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `UPDATE tenants SET shipping_fee_satang = -1 WHERE id = $1`, shop.ID); err == nil {
+			t.Fatal("negative fee was accepted")
+		}
+		if _, err := pool.Exec(ctx, `UPDATE tenants SET free_shipping_from_satang = 0 WHERE id = $1`, shop.ID); err == nil {
+			t.Fatal("zero threshold was accepted")
+		}
+	})
+}

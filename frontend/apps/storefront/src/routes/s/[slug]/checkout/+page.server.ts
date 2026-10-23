@@ -33,10 +33,13 @@ export const actions: Actions = {
     if (!Array.isArray(items) || items.length === 0) {
       return fail(400, { values, error: { code: 'empty_cart', message: 'cart is empty' } })
     }
+    // The total the page showed; the API compares it with its own (prices, shipping) before saving.
+    const expected = Number(form.get('expected_total_satang'))
+    const expected_total_satang = Number.isSafeInteger(expected) && expected >= 0 ? expected : undefined
 
     const res = await api<PlaceOrderResponse>(`/public/shops/${encodeURIComponent(params.slug)}/orders`, {
       method: 'POST',
-      body: { ...values, items } satisfies PlaceOrderRequest,
+      body: { ...values, items, expected_total_satang } satisfies PlaceOrderRequest,
     })
     if (!res.ok) {
       // fail() keeps the customer on the page with what they typed, plus the error to show.

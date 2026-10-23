@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatTHB } from '@mscs/shared'
+  import { describeShipping, formatTHB } from '@mscs/shared'
   import { getCart } from '#lib/cart.svelte.ts'
   import { initial, swatch } from '#lib/ui.ts'
   import type { PageProps } from './$types'
@@ -7,6 +7,10 @@
   let { data }: PageProps = $props()
   const cart = getCart()
 </script>
+
+<p class="mb-4 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-sm text-amber-900">
+  <span aria-hidden="true">🚚</span>{describeShipping(data.shop.shipping)}
+</p>
 
 {#if data.products.length === 0}
   <p class="py-20 text-center text-stone-500">ร้านยังไม่มีสินค้าวางขายในขณะนี้</p>

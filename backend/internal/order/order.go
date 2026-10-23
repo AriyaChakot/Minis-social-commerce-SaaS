@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"mscs/internal/tenant"
 )
 
 // Order is one customer purchase in one shop.
@@ -105,6 +107,12 @@ type CreateInput struct {
 	Note              string
 	ShippingFeeSatang int64
 	Items             []ItemInput
+	// ShippingRates, when set, decides the fee from the subtotal (storefront orders), instead of
+	// ShippingFeeSatang typed by a merchant.
+	ShippingRates *tenant.ShippingRates
+	// ExpectedTotalSatang, when set, is the total the customer was shown: if prices or shipping
+	// rates changed since, the order is refused (TotalChangedError) rather than charged differently.
+	ExpectedTotalSatang *int64
 }
 
 type ItemInput struct {
@@ -159,6 +167,19 @@ type InsufficientStockError struct {
 
 func (e *InsufficientStockError) Error() string {
 	return fmt.Sprintf("order: product %s: requested %d, only %d in stock", e.ProductID, e.Requested, e.Available)
+}
+
+// TotalChangedError: the order would cost something else than the customer was shown (a price
+// or the shipping rates changed meanwhile). Nothing was saved; the new amounts are attached.
+type TotalChangedError struct {
+	Expected          int64
+	SubtotalSatang    int64
+	ShippingFeeSatang int64
+	TotalSatang       int64
+}
+
+func (e *TotalChangedError) Error() string {
+	return fmt.Sprintf("order: total is %d, not the expected %d", e.TotalSatang, e.Expected)
 }
 
 type TransitionError struct {

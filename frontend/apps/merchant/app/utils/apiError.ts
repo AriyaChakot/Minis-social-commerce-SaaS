@@ -21,6 +21,7 @@ const MESSAGES: Record<string, string> = {
   invitation_wrong_account: 'คำเชิญนี้ส่งถึงอีเมลอื่น ไม่ใช่บัญชีที่คุณเข้าสู่ระบบอยู่',
   already_member: 'อีเมลนี้เป็นสมาชิกของร้านอยู่แล้ว',
   member_not_found: 'ไม่พบสมาชิกคนนี้ (อาจถูกนำออกไปแล้ว)',
+  total_changed: 'ราคาหรือค่าส่งเพิ่งเปลี่ยน กรุณาตรวจสอบยอดอีกครั้ง',
   image_too_large: 'รูปใหญ่เกิน 15 MB',
   image_unsupported: 'รองรับเฉพาะรูป JPEG, PNG และ WebP',
   image_too_many_pixels: 'รูปละเอียดเกิน 50 ล้านพิกเซล',

@@ -44,8 +44,17 @@ export interface Tenant {
   status: 'active' | 'suspended'
   /** Why the platform suspended the shop; empty while active. */
   suspended_reason: string
+  /** What the storefront charges for delivery. */
+  shipping: ShippingRates
   created_at: Timestamp
   updated_at: Timestamp
+}
+
+/** A shop's shipping rates: a flat fee per order, free once the subtotal reaches free_from_satang. */
+export interface ShippingRates {
+  fee_satang: Satang
+  /** null: never free (unless the fee is 0). */
+  free_from_satang: Satang | null
 }
 
 export interface Membership {
@@ -182,6 +191,7 @@ export interface CreateOrderRequest {
 export interface StorefrontShop {
   slug: string
   name: string
+  shipping: ShippingRates
 }
 
 export interface StorefrontProduct {
@@ -224,6 +234,8 @@ export interface PlaceOrderRequest {
   shipping_address: string
   note?: string
   items: { product_id: ID; quantity: number }[]
+  /** The total shown to the customer; the API refuses the order (409 total_changed) if its own differs. */
+  expected_total_satang?: Satang
 }
 
 export interface PlaceOrderResponse {

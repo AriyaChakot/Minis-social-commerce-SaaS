@@ -125,6 +125,16 @@ func (s *Service) place(ctx context.Context, tenantID uuid.UUID, createdBy *uuid
 			})
 		}
 
+		fee := in.ShippingFeeSatang
+		if in.ShippingRates != nil {
+			fee = in.ShippingRates.FeeFor(subtotal)
+		}
+		// Checked here, on the prices just locked, so nothing can change between check and save.
+		if in.ExpectedTotalSatang != nil && *in.ExpectedTotalSatang != subtotal+fee {
+			return &TotalChangedError{Expected: *in.ExpectedTotalSatang, SubtotalSatang: subtotal,
+				ShippingFeeSatang: fee, TotalSatang: subtotal + fee}
+		}
+
 		for _, it := range items {
 			if err := s.products.AdjustStock(ctx, tx, tenantID, it.ProductID, -it.Quantity); err != nil {
 				return err
@@ -145,8 +155,8 @@ func (s *Service) place(ctx context.Context, tenantID uuid.UUID, createdBy *uuid
 			Channel:           in.Channel,
 			Note:              in.Note,
 			SubtotalSatang:    subtotal,
-			ShippingFeeSatang: in.ShippingFeeSatang,
-			TotalSatang:       subtotal + in.ShippingFeeSatang,
+			ShippingFeeSatang: fee,
+			TotalSatang:       subtotal + fee,
 			CreatedBy:         createdBy,
 		}
 		if err := s.repo.Insert(ctx, tx, &created, trackingTokenHash); err != nil {

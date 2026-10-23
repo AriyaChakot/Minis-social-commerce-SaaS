@@ -2,7 +2,7 @@
 import { z } from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 import type { CreateOrderRequest, Order, OrderChannel, Page, Product } from '@mscs/shared'
-import { formatTHB, parseBahtToSatang } from '@mscs/shared'
+import { formatTHB, parseBahtToSatang, satangToBahtInput, shippingFeeFor } from '@mscs/shared'
 
 useHead({ title: 'สร้างออเดอร์' })
 
@@ -78,6 +78,9 @@ const lineTotal = (l: { product_id: string; quantity: number }) =>
   (productById.value.get(l.product_id)?.price_satang ?? 0) * (l.quantity || 0)
 const subtotal = computed(() => state.items.reduce((sum, l) => sum + lineTotal(l), 0))
 const shippingFee = computed(() => parseBahtToSatang(state.shipping_fee || '0') ?? 0)
+// Chat orders often have their own deal, so the fee stays the merchant's choice; the shop's
+// storefront rate is one click away.
+const shopFee = computed(() => shippingFeeFor(shop.value.tenant.shipping, subtotal.value))
 
 // ---- Submit ---------------------------------------------------------------------
 const saving = ref(false)
@@ -214,6 +217,15 @@ function orderErrorMessage(e: unknown): string {
           </div>
           <UFormField label="ค่าส่ง (บาท)" name="shipping_fee">
             <UInput v-model="state.shipping_fee" inputmode="decimal" placeholder="0.00" class="w-full" />
+            <template v-if="shop.tenant.shipping.fee_satang > 0" #help>
+              <UButton
+                variant="link"
+                size="xs"
+                class="px-0"
+                :label="`ใช้ค่าส่งของร้าน (${shopFee === 0 ? 'ส่งฟรี' : formatTHB(shopFee)})`"
+                @click="state.shipping_fee = satangToBahtInput(shopFee)"
+              />
+            </template>
           </UFormField>
           <USeparator />
           <div class="flex justify-between text-base font-semibold">

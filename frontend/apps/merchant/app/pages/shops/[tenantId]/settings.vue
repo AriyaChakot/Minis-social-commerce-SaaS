@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { z } from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
-import type { LineChannel } from '@mscs/shared'
-import { formatDateTime } from '@mscs/shared'
+import type { LineChannel, ShippingRates } from '@mscs/shared'
+import { describeShipping, formatDateTime, parseBahtToSatang, satangToBahtInput } from '@mscs/shared'
 
 useHead({ title: 'ตั้งค่า' })
 
@@ -15,6 +15,58 @@ if (!shop.value.canManage) {
   throw createError({ statusCode: 403, statusMessage: 'เฉพาะเจ้าของร้านและผู้ดูแลเท่านั้น' })
 }
 
+// ---- Shipping rates (storefront orders) ------------------------------------------------
+const MAX_FEE = 1_000_000 // ฿10,000, same limit as the API
+const bahtField = (max: number, tooHigh: string) => z.string().trim()
+  .refine(v => parseBahtToSatang(v) !== null, 'กรอกเป็นตัวเลข เช่น 40 หรือ 40.50')
+  .refine(v => (parseBahtToSatang(v) ?? 0) <= max, tooHigh)
+const shippingSchema = z.object({
+  fee: bahtField(MAX_FEE, 'ค่าส่งไม่เกิน ฿10,000'),
+  freeEnabled: z.boolean(),
+  freeFrom: z.string(),
+}).superRefine((v, ctx) => {
+  if (!v.freeEnabled) return
+  const amount = parseBahtToSatang(v.freeFrom)
+  if (amount === null || amount < 1 || amount > 1_000_000_000) {
+    ctx.addIssue({ code: 'custom', path: ['freeFrom'], message: 'กรอกยอดซื้อขั้นต่ำ เช่น 500' })
+  }
+})
+const saved = computed(() => shop.value.tenant.shipping)
+const shippingState = reactive({
+  fee: satangToBahtInput(saved.value.fee_satang),
+  freeEnabled: saved.value.free_from_satang !== null,
+  freeFrom: saved.value.free_from_satang !== null ? satangToBahtInput(saved.value.free_from_satang) : '',
+})
+// What customers will read, live while typing (only when the fields are valid).
+const shippingPreview = computed<ShippingRates | null>(() => {
+  const fee = parseBahtToSatang(shippingState.fee)
+  const freeFrom = shippingState.freeEnabled ? parseBahtToSatang(shippingState.freeFrom) : null
+  if (fee === null || (shippingState.freeEnabled && !freeFrom)) return null
+  return { fee_satang: fee, free_from_satang: freeFrom }
+})
+const savingShipping = ref(false)
+
+async function onSaveShipping() {
+  if (!shippingPreview.value) return
+  savingShipping.value = true
+  try {
+    await $fetch(`/api/tenants/${shop.value.id}/shipping`, { method: 'PUT', body: shippingPreview.value })
+    // The shop (with its rates) is loaded once by the parent page: reload it.
+    await refreshNuxtData(`shop-${shop.value.id}`)
+    toast.add({ title: 'บันทึกค่าส่งแล้ว ใช้กับออเดอร์ใหม่จากหน้าร้านทันที', color: 'success', icon: 'i-lucide-check' })
+  }
+  catch (e) {
+    toast.add({ title: apiErrorMessage(e), color: 'error' })
+  }
+  finally {
+    savingShipping.value = false
+  }
+}
+
+const hydrated = ref(false)
+onMounted(() => { hydrated.value = true })
+
+// ---- LINE ------------------------------------------------------------------------------
 const endpoint = computed(() => `/api/tenants/${shop.value.id}/channels/line`)
 const { data } = await useFetch<{ line: LineChannel | null }>(endpoint, {
   key: () => `line-channel-${shop.value.id}`,
@@ -91,6 +143,31 @@ const isDev = import.meta.dev
 
 <template>
   <div class="max-w-2xl space-y-6">
+    <UCard>
+      <template #header>
+        <h2 class="font-semibold">
+          ค่าจัดส่ง
+        </h2>
+        <p class="text-sm text-muted">
+          ใช้กับออเดอร์ที่ลูกค้าสั่งผ่านหน้าร้านออนไลน์ ออเดอร์เก่าไม่เปลี่ยนตาม
+        </p>
+      </template>
+
+      <UForm :schema="shippingSchema" :state="shippingState" class="space-y-4 text-sm" @submit="onSaveShipping">
+        <UFormField label="ค่าส่งต่อออเดอร์ (บาท)" name="fee" help="ใส่ 0 ถ้าส่งฟรีทุกออเดอร์">
+          <UInput v-model="shippingState.fee" inputmode="decimal" class="w-40" />
+        </UFormField>
+        <USwitch v-model="shippingState.freeEnabled" label="ส่งฟรีเมื่อซื้อครบยอด" />
+        <UFormField v-if="shippingState.freeEnabled" label="ยอดซื้อขั้นต่ำ (บาท)" name="freeFrom">
+          <UInput v-model="shippingState.freeFrom" inputmode="decimal" placeholder="500" class="w-40" />
+        </UFormField>
+        <p class="rounded-lg bg-elevated px-4 py-3">
+          <span class="text-muted">ลูกค้าจะเห็น:</span>&nbsp;<span class="font-medium">{{ shippingPreview ? describeShipping(shippingPreview) : '—' }}</span>
+        </p>
+        <UButton type="submit" :loading="savingShipping" :disabled="!hydrated" label="บันทึกค่าส่ง" />
+      </UForm>
+    </UCard>
+
     <UCard>
       <template #header>
         <div class="flex items-center justify-between gap-3">

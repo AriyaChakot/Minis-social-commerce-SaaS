@@ -25,6 +25,8 @@ var ErrShopNotFound = errors.New("storefront: shop not found")
 type Shop struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
+	// Shipping lets the cart show the fee before checkout; the order is charged by the server.
+	Shipping tenant.ShippingRates `json:"shipping"`
 }
 
 type Product struct {
@@ -70,6 +72,8 @@ type PlaceOrderInput struct {
 	ShippingAddress string
 	Note            string
 	Items           []order.ItemInput
+	// ExpectedTotalSatang is the total shown in the cart (optional; the storefront always sends it).
+	ExpectedTotalSatang *int64
 }
 
 // ---- Service ----
@@ -101,7 +105,7 @@ func (s *Service) Shop(ctx context.Context, slug string) (Shop, error) {
 	if err != nil {
 		return Shop{}, err
 	}
-	return Shop{Slug: t.Slug, Name: t.Name}, nil
+	return Shop{Slug: t.Slug, Name: t.Name, Shipping: t.Shipping}, nil
 }
 
 // Products lists what is on sale. MVP limit: the newest 100 active products.
@@ -123,7 +127,9 @@ func (s *Service) Products(ctx context.Context, slug string) ([]Product, error) 
 }
 
 // PlaceOrder creates a guest order. Prices always come from the database, and the customer
-// cannot choose the channel or the shipping fee: storefront orders ship free in this version.
+// cannot choose the channel or the shipping fee: the fee comes from the shop's shipping rates.
+// With ExpectedTotalSatang, a change of price or rates since the cart was shown refuses the order
+// (order.TotalChangedError) instead of charging an amount the customer did not see.
 func (s *Service) PlaceOrder(ctx context.Context, slug string, in PlaceOrderInput) (Order, string, error) {
 	t, err := s.shop(ctx, slug)
 	if err != nil {
@@ -138,12 +144,14 @@ func (s *Service) PlaceOrder(ctx context.Context, slug string, in PlaceOrderInpu
 	}
 
 	o, token, err := s.orders.PlaceGuestOrder(ctx, t.ID, order.CreateInput{
-		CustomerName:    in.CustomerName,
-		CustomerPhone:   in.CustomerPhone,
-		ShippingAddress: in.ShippingAddress,
-		Note:            in.Note,
-		Channel:         order.ChannelStorefront,
-		Items:           in.Items,
+		CustomerName:        in.CustomerName,
+		CustomerPhone:       in.CustomerPhone,
+		ShippingAddress:     in.ShippingAddress,
+		Note:                in.Note,
+		Channel:             order.ChannelStorefront,
+		Items:               in.Items,
+		ShippingRates:       &t.Shipping,
+		ExpectedTotalSatang: in.ExpectedTotalSatang,
 	})
 	if err != nil {
 		return Order{}, "", err

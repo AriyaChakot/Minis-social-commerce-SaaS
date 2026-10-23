@@ -22,8 +22,8 @@ run against a real database.
 | ![Storefront](docs/screenshots/storefront-shop.png) | ![Order tracking](docs/screenshots/storefront-order.png) |
 | **Chat inbox (LINE)** | **Team** |
 | ![Chat inbox](docs/screenshots/inbox.png) | ![Team members and invitations](docs/screenshots/team.png) |
-| **Invitation link** | |
-| ![Accepting an invitation](docs/screenshots/invite.png) | |
+| **Invitation link** | **Cart and checkout (customer)** |
+| ![Accepting an invitation](docs/screenshots/invite.png) | ![Checkout with shipping fee](docs/screenshots/storefront-checkout.png) |
 
 *The UI is in Thai, the language of its target users.*
 
@@ -43,6 +43,9 @@ run against a real database.
 - **Merchant admin web app** — server-rendered Nuxt app with form validation, toasts, confirmation dialogs.
 - **Customer storefront** — SvelteKit app at `/s/<shop-slug>`: product grid, cart, guest checkout, and a private
   tracking page that shows the order's progress as the merchant updates it.
+- **Shipping rates** — each shop sets a flat fee per order, optionally free from an order amount ("free shipping
+  over ฿1,000"). The cart shows the fee and how much more to buy for free shipping; merchants can apply the same
+  rate to orders they enter by hand with one click.
 - **Chat inbox** — connect the shop's LINE Official Account; customers' messages arrive by webhook and appear in
   one inbox per shop (unread counts, live refresh, customers' LINE names and pictures). Reply from the inbox, and
   turn a chat into an order in one click.
@@ -125,6 +128,16 @@ API exposes dedicated view types (no SKU, phone, address or internal ids), and t
 decides prices, channel and shipping fee. Checkout is a SvelteKit form action (works as a plain HTML form,
 protected by SvelteKit's origin check); the tracking page sends `Cache-Control: private, no-store` and a
 `no-referrer` policy, so the secret URL is neither cached nor leaked to other sites.
+
+**The customer pays the total they were shown.** The shipping fee depends on the subtotal (free from an amount), so
+it is computed inside the order transaction, on the product prices just locked — never taken from the browser.
+But a merchant may change a price or the shipping rates while a customer is on the checkout page. Instead of
+silently charging a different amount, the cart sends the total it displayed (`expected_total_satang`); the API
+compares it with its own inside the same transaction and, if they differ, rolls back (no stock taken) and answers
+`409 total_changed` with the new amounts. The page reloads its data, shows the new total and keeps what the
+customer typed. The fee rule exists twice (Go charges, TypeScript only displays), so a mismatch between them can
+cost a refused order but never a wrong charge; Go tests cover the boundary ("exactly the free-shipping amount
+ships free"), and the limits are enforced again by database `CHECK`s.
 
 **Background jobs with leader election.** The worker can run as several replicas for availability, but only one
 does the work: whoever holds a PostgreSQL session-level advisory lock (`pg_try_advisory_lock`) is the leader, and
@@ -306,6 +319,7 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 | `GET` | `/invitations/:token` | What an invitation link is for (public) |
 | `POST` | `/invitations/:token/accept` | Join with the logged-in account (its email must match) |
 | `POST` | `/invitations/:token/register` | Create the invited account, join and start a session (public) |
+| `PUT` | `/tenants/:tenantID/shipping` | Shipping rates: `fee_satang`, `free_from_satang` (owner/admin) |
 | `GET` `PUT` | `/tenants/:tenantID/channels/line` | LINE connection: channel secret and access token, both write-only (`PUT` for owner/admin) |
 | `POST` | `/webhooks/line/:channelID` | LINE webhook (authenticated by its signature) |
 
@@ -313,9 +327,9 @@ All routes are under `/api/v1`. Shop routes require membership of `:tenantID`; c
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/public/shops/:slug` | Shop name |
+| `GET` | `/public/shops/:slug` | Shop name and shipping rates |
 | `GET` | `/public/shops/:slug/products` | Products on sale (public fields only) |
-| `POST` | `/public/shops/:slug/orders` | Guest order; returns the order and a one-time tracking token |
+| `POST` | `/public/shops/:slug/orders` | Guest order (with the `expected_total_satang` shown); returns the order and a one-time tracking token |
 | `GET` | `/public/shops/:slug/orders/:token` | Track a guest order |
 
 **Platform console API** (session cookie from `POST /platform/login`; platform admins only; `POST`s need the
@@ -378,7 +392,7 @@ scripts/                developer helpers
 - [x] Platform admin console (React)
 - [x] Product photos (object storage, safe image processing)
 - [x] Staff invitations (one-time links, roles, removing members)
-- [ ] Shipping fees for storefront orders
+- [x] Shipping fees for storefront orders (flat fee, free over an amount)
 - [ ] Deploy to production (domain, HTTPS, CDN, backups)
 
 ---

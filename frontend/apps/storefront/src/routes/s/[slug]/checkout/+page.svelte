@@ -1,6 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms'
-  import { formatTHB } from '@mscs/shared'
+  import { formatTHB, shippingFeeFor } from '@mscs/shared'
   import { getCart } from '#lib/cart.svelte.ts'
   import { initial, orderErrorMessage, swatch } from '#lib/ui.ts'
   import type { PageProps } from './$types'
@@ -15,6 +15,17 @@
   const lines = $derived(cart.lines.map(l => ({ ...l, product: productById.get(l.productId) })))
   const subtotal = $derived(lines.reduce((sum, l) => sum + (l.product ? l.product.price_satang * l.quantity : 0), 0))
   const hasUnavailable = $derived(lines.some(l => !l.product))
+
+  // The fee by the shop's rates (reloaded with every submit, see use:enhance below). The server
+  // computes it again; the total shown here goes with the order, so a different one is refused.
+  const rates = $derived(data.shop.shipping)
+  const shippingFee = $derived(shippingFeeFor(rates, subtotal))
+  const total = $derived(subtotal + shippingFee)
+  const toFreeShipping = $derived(
+    rates.fee_satang > 0 && rates.free_from_satang !== null && subtotal < rates.free_from_satang
+      ? rates.free_from_satang - subtotal
+      : 0,
+  )
 
   // What the form sends: ids and quantities only. Prices are decided by the server.
   const itemsJson = $derived(JSON.stringify(cart.lines.map(l => ({ product_id: l.productId, quantity: l.quantity }))))
@@ -95,6 +106,7 @@
       }}
     >
       <input type="hidden" name="items" value={itemsJson} />
+      <input type="hidden" name="expected_total_satang" value={total} />
 
       <h2 class="font-semibold">ข้อมูลจัดส่ง</h2>
       <label class="block">
@@ -120,9 +132,12 @@
 
       <dl class="space-y-1 border-t border-stone-200 pt-4 text-sm">
         <div class="flex justify-between"><dt class="text-stone-500">ยอดสินค้า</dt><dd class="tabular-nums">{formatTHB(subtotal)}</dd></div>
-        <div class="flex justify-between"><dt class="text-stone-500">ค่าจัดส่ง</dt><dd>ฟรี</dd></div>
-        <div class="flex justify-between pt-1 text-base font-semibold"><dt>ยอดรวม</dt><dd class="tabular-nums">{formatTHB(subtotal)}</dd></div>
+        <div class="flex justify-between"><dt class="text-stone-500">ค่าจัดส่ง</dt><dd class="tabular-nums">{shippingFee === 0 ? 'ฟรี' : formatTHB(shippingFee)}</dd></div>
+        <div class="flex justify-between pt-1 text-base font-semibold"><dt>ยอดรวม</dt><dd class="tabular-nums">{formatTHB(total)}</dd></div>
       </dl>
+      {#if toFreeShipping > 0}
+        <p class="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">ซื้อเพิ่มอีก {formatTHB(toFreeShipping)} รับส่งฟรี</p>
+      {/if}
 
       {#if errorMessage}
         <p class="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{errorMessage}</p>

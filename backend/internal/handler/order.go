@@ -163,6 +163,7 @@ func writeOrderError(c *gin.Context, err error) {
 		stockErr *order.InsufficientStockError
 		unavail  *order.ProductUnavailableError
 		transErr *order.TransitionError
+		totalErr *order.TotalChangedError
 	)
 	switch {
 	case errors.As(err, &verr):
@@ -174,6 +175,10 @@ func writeOrderError(c *gin.Context, err error) {
 	case errors.As(err, &unavail):
 		writeErrorDetails(c, http.StatusConflict, "product_unavailable", "a product is not available for sale",
 			gin.H{"product_id": unavail.ProductID})
+	case errors.As(err, &totalErr):
+		writeErrorDetails(c, http.StatusConflict, "total_changed", "prices or shipping rates have changed",
+			gin.H{"subtotal_satang": totalErr.SubtotalSatang, "shipping_fee_satang": totalErr.ShippingFeeSatang,
+				"total_satang": totalErr.TotalSatang})
 	case errors.As(err, &transErr):
 		writeErrorDetails(c, http.StatusConflict, "invalid_transition", transErr.Error(),
 			gin.H{"from": transErr.From, "to": transErr.To})

@@ -1,4 +1,4 @@
-import type { Satang } from './api'
+import type { Satang, ShippingRates } from './api'
 
 const thb = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' })
 
@@ -24,4 +24,19 @@ export function parseBahtToSatang(input: string): Satang | null {
 /** 25900 -> "259.00" (for pre-filling an input field). */
 export function satangToBahtInput(amount: Satang): string {
   return (amount / 100).toFixed(2)
+}
+
+/**
+ * The shipping fee of an order with this subtotal. Same rule as the Go API
+ * (tenant.ShippingRates.FeeFor): shown in carts and previews, but only the API's result is charged.
+ */
+export function shippingFeeFor(rates: ShippingRates, subtotal: Satang): Satang {
+  return rates.free_from_satang !== null && subtotal >= rates.free_from_satang ? 0 : rates.fee_satang
+}
+
+/** One line for customers and merchants: "ค่าส่ง ฿40 · ส่งฟรีเมื่อซื้อครบ ฿600". */
+export function describeShipping(rates: ShippingRates): string {
+  if (rates.fee_satang === 0) return 'ส่งฟรีทุกออเดอร์'
+  const fee = `ค่าส่ง ${formatTHB(rates.fee_satang)}`
+  return rates.free_from_satang === null ? `${fee} ต่อออเดอร์` : `${fee} · ส่งฟรีเมื่อซื้อครบ ${formatTHB(rates.free_from_satang)}`
 }

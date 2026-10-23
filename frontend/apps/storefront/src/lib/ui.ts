@@ -1,4 +1,5 @@
 import type { ApiErrorBody, OrderStatus } from '@mscs/shared'
+import { formatTHB } from '@mscs/shared'
 
 // Small display helpers shared by the storefront pages.
 
@@ -38,13 +39,15 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
 /** Thai text for an API error, naming the product when the error is about one. */
 export function orderErrorMessage(error: ApiErrorBody['error'] | undefined, productName: (id: string) => string | undefined): string {
   if (!error) return 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
-  const details = error.details as { product_id?: string; available?: number } | undefined
+  const details = error.details as { product_id?: string; available?: number; total_satang?: number } | undefined
   const name = (details?.product_id && productName(details.product_id)) || 'สินค้าบางรายการ'
   switch (error.code) {
     case 'insufficient_stock':
       return `“${name}” เหลือเพียง ${details?.available ?? 0} ชิ้น กรุณาปรับจำนวน`
     case 'product_unavailable':
       return `“${name}” หยุดขายแล้ว กรุณานำออกจากตะกร้า`
+    case 'total_changed':
+      return `ราคาหรือค่าส่งเพิ่งเปลี่ยน ยอดรวมใหม่คือ ${formatTHB(details?.total_satang ?? 0)} กรุณาตรวจสอบแล้วกดยืนยันอีกครั้ง`
     case 'validation_failed':
       return 'กรุณากรอกข้อมูลให้ครบถ้วน'
     case 'api_unavailable':
